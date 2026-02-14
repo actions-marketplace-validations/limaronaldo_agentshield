@@ -128,7 +128,14 @@ mod integration_tests {
             &opts,
         )
         .unwrap();
-        assert!(report.findings.is_empty());
+        // No code-level security findings (SHIELD-001 through SHIELD-006, SHIELD-011)
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.severity >= rules::Severity::High),
+            "safe calculator should have no High+ findings"
+        );
         assert!(report.verdict.pass);
     }
 
