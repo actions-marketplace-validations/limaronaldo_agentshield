@@ -1,12 +1,30 @@
 use crate::rules::policy::PolicyVerdict;
 use crate::rules::{Finding, Severity};
 
+// ANSI color codes
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const BLUE: &str = "\x1b[34m";
+const MAGENTA: &str = "\x1b[35m";
+const CYAN: &str = "\x1b[36m";
+
 /// Render findings as colored console output, grouped by severity then file path.
 pub fn render(findings: &[Finding], verdict: &PolicyVerdict) -> String {
+    let use_color = std::env::var("NO_COLOR").is_err();
     let mut output = String::new();
 
     if findings.is_empty() {
-        output.push_str("\n  No security findings detected.\n\n");
+        if use_color {
+            output.push_str(&format!(
+                "\n  {GREEN}{BOLD}No security findings detected.{RESET}\n\n"
+            ));
+        } else {
+            output.push_str("\n  No security findings detected.\n\n");
+        }
         return output;
     }
 
@@ -20,15 +38,30 @@ pub fn render(findings: &[Finding], verdict: &PolicyVerdict) -> String {
         })
     });
 
-    output.push_str(&format!("\n  {} finding(s) detected:\n\n", findings.len()));
+    output.push_str(&format!(
+        "\n  {bold}{} finding(s) detected:{reset}\n\n",
+        findings.len(),
+        bold = if use_color { BOLD } else { "" },
+        reset = if use_color { RESET } else { "" },
+    ));
 
     for finding in &sorted {
-        let severity_tag = match finding.severity {
-            Severity::Critical => "[CRITICAL]",
-            Severity::High => "[HIGH]    ",
-            Severity::Medium => "[MEDIUM]  ",
-            Severity::Low => "[LOW]     ",
-            Severity::Info => "[INFO]    ",
+        let severity_tag = if use_color {
+            match finding.severity {
+                Severity::Critical => format!("{RED}{BOLD}[CRITICAL]{RESET}"),
+                Severity::High => format!("{MAGENTA}{BOLD}[HIGH]    {RESET}"),
+                Severity::Medium => format!("{YELLOW}{BOLD}[MEDIUM]  {RESET}"),
+                Severity::Low => format!("{BLUE}[LOW]     {RESET}"),
+                Severity::Info => format!("{DIM}[INFO]    {RESET}"),
+            }
+        } else {
+            match finding.severity {
+                Severity::Critical => "[CRITICAL]".into(),
+                Severity::High => "[HIGH]    ".into(),
+                Severity::Medium => "[MEDIUM]  ".into(),
+                Severity::Low => "[LOW]     ".into(),
+                Severity::Info => "[INFO]    ".into(),
+            }
         };
 
         let location = finding
@@ -38,26 +71,47 @@ pub fn render(findings: &[Finding], verdict: &PolicyVerdict) -> String {
             .unwrap_or_else(|| "-".into());
 
         output.push_str(&format!(
-            "  {} {} {}\n",
-            severity_tag, finding.rule_id, finding.message
+            "  {} {bold}{}{reset} {}\n",
+            severity_tag,
+            finding.rule_id,
+            finding.message,
+            bold = if use_color { BOLD } else { "" },
+            reset = if use_color { RESET } else { "" },
         ));
-        output.push_str(&format!("           at {}\n", location));
+        output.push_str(&format!(
+            "           {dim}at {}{reset}\n",
+            location,
+            dim = if use_color { DIM } else { "" },
+            reset = if use_color { RESET } else { "" },
+        ));
         if let Some(remediation) = &finding.remediation {
-            output.push_str(&format!("           fix: {}\n", remediation));
+            output.push_str(&format!(
+                "           {cyan}fix: {}{reset}\n",
+                remediation,
+                cyan = if use_color { CYAN } else { "" },
+                reset = if use_color { RESET } else { "" },
+            ));
         }
         output.push('\n');
     }
 
     // Verdict
-    let status = if verdict.pass { "PASS" } else { "FAIL" };
+    let (status, status_color) = if verdict.pass {
+        ("PASS", if use_color { GREEN } else { "" })
+    } else {
+        ("FAIL", if use_color { RED } else { "" })
+    };
     output.push_str(&format!(
-        "  Result: {} (threshold: {}, highest: {})\n\n",
+        "  Result: {sc}{bold}{}{reset} (threshold: {}, highest: {})\n\n",
         status,
         verdict.fail_threshold,
         verdict
             .highest_severity
             .map(|s| s.to_string())
             .unwrap_or_else(|| "none".into()),
+        sc = status_color,
+        bold = if use_color { BOLD } else { "" },
+        reset = if use_color { RESET } else { "" },
     ));
 
     output
