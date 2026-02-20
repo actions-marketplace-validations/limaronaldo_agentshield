@@ -49,16 +49,15 @@ pub fn render(findings: &[Finding], target_name: &str) -> Result<String> {
                         },
                         "region": {
                             "startLine": loc.line,
-                            "startColumn": loc.column,
+                            "startColumn": loc.column.max(1),
                         },
                     },
                 }]);
             }
 
             if let Some(remediation) = &f.remediation {
-                result["fixes"] = json!([{
-                    "description": { "text": remediation },
-                }]);
+                result["properties"] =
+                    json!({ "remediation": remediation });
             }
 
             result
