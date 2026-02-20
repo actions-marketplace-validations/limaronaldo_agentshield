@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use super::{FunctionParam, LanguageParser, ParsedFile};
+use super::{CallSite, FunctionDef, FunctionParam, LanguageParser, ParsedFile};
+use crate::analysis::cross_file::is_sanitizer;
 use crate::error::Result;
 use crate::ir::execution_surface::*;
 use crate::ir::{ArgumentSource, Language, SourceLocation};
@@ -117,6 +118,12 @@ static SENSITIVE_ENV_VARS: Lazy<Regex> = Lazy::new(|| {
 // Template literal with interpolation: `...${expr}...`
 static TEMPLATE_LITERAL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\$\{[^}]+\}").unwrap());
 
+// Sanitizer assignment: const validPath = await validatePath(x)
+// Captures: (1) variable name, (2) function name (possibly dotted)
+static SANITIZER_ASSIGN_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?(\w+(?:\.\w+)*)\s*\(").unwrap()
+});
+
 // ── tree-sitter AST parser ──────────────────────────────────────
 
 #[cfg(feature = "typescript")]
@@ -156,7 +163,10 @@ impl LanguageParser for TypeScriptParser {
         let mut parsed = ParsedFile::default();
         let mut param_names = HashSet::new();
 
-        // Phase 1: Collect function parameters
+        // Phase 0: Detect sanitizer assignments via regex on source text
+        detect_sanitizer_assignments(content, &mut parsed.sanitized_vars);
+
+        // Phase 1: Collect function parameters + function defs
         collect_params(
             tree.root_node(),
             source,
@@ -165,7 +175,7 @@ impl LanguageParser for TypeScriptParser {
             &mut parsed,
         );
 
-        // Phase 2: Walk AST for call expressions and env accesses
+        // Phase 2: Walk AST for call expressions, call sites, and env accesses
         walk_node(
             tree.root_node(),
             source,
@@ -178,7 +188,7 @@ impl LanguageParser for TypeScriptParser {
     }
 }
 
-/// Recursively collect function/method/arrow parameter names.
+/// Recursively collect function/method/arrow parameter names + FunctionDef entries.
 #[cfg(feature = "typescript")]
 fn collect_params(
     node: tree_sitter::Node,
@@ -197,12 +207,15 @@ fn collect_params(
         || kind == "function_expression"
     {
         let func_name = extract_function_name(node, source).unwrap_or_default();
+        let mut func_params = Vec::new();
+
         if let Some(params_node) = node.child_by_field_name("parameters") {
             for i in 0..params_node.named_child_count() {
                 if let Some(param) = params_node.named_child(i) {
                     for name in extract_param_names(param, source) {
                         if name != "this" {
                             param_names.insert(name.clone());
+                            func_params.push(name.clone());
                             parsed.function_params.push(FunctionParam {
                                 function_name: func_name.clone(),
                                 param_name: name,
@@ -213,6 +226,17 @@ fn collect_params(
                 }
             }
         }
+
+        // Record FunctionDef if we have a name
+        if !func_name.is_empty() {
+            let is_exported = is_exported_node(node, source);
+            parsed.function_defs.push(FunctionDef {
+                name: func_name,
+                params: func_params,
+                is_exported,
+                location: loc(file_path, node),
+            });
+        }
     }
 
     // Recurse
@@ -221,6 +245,33 @@ fn collect_params(
             collect_params(child, source, file_path, param_names, parsed);
         }
     }
+}
+
+/// Check if a function node is exported (has `export` keyword in ancestors or declaration).
+#[cfg(feature = "typescript")]
+fn is_exported_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+    // Check if the function/arrow is inside an export_statement
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        let pk = parent.kind();
+        if pk == "export_statement" {
+            return true;
+        }
+        // Stop at top-level statements
+        if pk == "program" || pk == "statement_block" {
+            break;
+        }
+        current = parent;
+    }
+    // Check for `module.exports` pattern — look at the parent variable_declarator
+    // e.g., module.exports.func = function(...) {}
+    if let Some(parent) = node.parent() {
+        let parent_text = node_text(parent, source);
+        if parent_text.contains("module.exports") || parent_text.contains("exports.") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Extract a function's name from its AST node.
@@ -357,22 +408,26 @@ fn walk_node(
         if let Some(func_node) = node.child_by_field_name("function") {
             let func_name = resolve_call_name(func_node, source);
 
-            // Get arguments text for classification
-            let args_text = node
-                .child_by_field_name("arguments")
-                .map(|args| {
-                    // Get first argument node text
-                    if args.named_child_count() > 0 {
-                        args.named_child(0)
-                            .map(|arg| node_text(arg, source).to_string())
-                            .unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
-                })
-                .unwrap_or_default();
+            // Classify all arguments (not just the first) for CallSite recording
+            let args_node = node.child_by_field_name("arguments");
+            let all_arg_sources = classify_all_arguments(
+                args_node,
+                source,
+                param_names,
+                &parsed.sanitized_vars,
+            );
 
-            let arg_source = classify_argument_text(&args_text, param_names);
+            // First argument source for existing detector logic
+            let arg_source = all_arg_sources.first().cloned().unwrap_or(ArgumentSource::Unknown);
+
+            // Record CallSite for cross-file analysis
+            let caller_name = find_enclosing_function(node, source);
+            parsed.call_sites.push(CallSite {
+                callee: func_name.clone(),
+                arguments: all_arg_sources,
+                caller: caller_name,
+                location: loc(file_path, node),
+            });
 
             // Command execution
             if matches_pattern(&func_name, &EXEC_PATTERNS) {
@@ -449,6 +504,50 @@ fn walk_node(
     }
 }
 
+/// Classify all arguments in a call expression (tree-sitter path).
+#[cfg(feature = "typescript")]
+fn classify_all_arguments(
+    args_node: Option<tree_sitter::Node>,
+    source: &[u8],
+    param_names: &HashSet<String>,
+    sanitized_vars: &HashSet<String>,
+) -> Vec<ArgumentSource> {
+    let Some(args) = args_node else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for i in 0..args.named_child_count() {
+        if let Some(arg) = args.named_child(i) {
+            let arg_text = node_text(arg, source).to_string();
+            result.push(classify_argument_with_sanitizers(
+                &arg_text,
+                param_names,
+                sanitized_vars,
+            ));
+        }
+    }
+    result
+}
+
+/// Find the enclosing function name for a node (for caller tracking).
+#[cfg(feature = "typescript")]
+fn find_enclosing_function(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        let pk = parent.kind();
+        if pk == "function_declaration"
+            || pk == "function"
+            || pk == "arrow_function"
+            || pk == "method_definition"
+            || pk == "function_expression"
+        {
+            return extract_function_name(parent, source);
+        }
+        current = parent;
+    }
+    None
+}
+
 /// Resolve a call expression's function name from its AST node.
 /// Handles: identifier, member_expression chains (a.b.c), optional_chain.
 #[cfg(feature = "typescript")]
@@ -504,6 +603,45 @@ fn loc(file: &Path, node: tree_sitter::Node) -> SourceLocation {
     }
 }
 
+// ── Shared sanitizer detection ──────────────────────────────────
+
+/// Detect sanitizer assignments in source code and populate sanitized_vars.
+/// Matches patterns like: `const validPath = await validatePath(x)`
+fn detect_sanitizer_assignments(content: &str, sanitized_vars: &mut HashSet<String>) {
+    for cap in SANITIZER_ASSIGN_RE.captures_iter(content) {
+        let var_name = &cap[1];
+        let func_name = &cap[2];
+        if is_sanitizer(func_name) {
+            sanitized_vars.insert(var_name.to_string());
+        }
+    }
+}
+
+/// Classify an argument, considering sanitized variables.
+fn classify_argument_with_sanitizers(
+    arg_text: &str,
+    param_names: &HashSet<String>,
+    sanitized_vars: &HashSet<String>,
+) -> ArgumentSource {
+    let first_arg = arg_text.split(',').next().unwrap_or("").trim();
+
+    if first_arg.is_empty() {
+        return ArgumentSource::Unknown;
+    }
+
+    // Check if this is a sanitized variable (before other checks)
+    let ident = first_arg.split('.').next().unwrap_or(first_arg);
+    let ident = ident.split('[').next().unwrap_or(ident);
+    if sanitized_vars.contains(ident) {
+        return ArgumentSource::Sanitized {
+            sanitizer: ident.to_string(),
+        };
+    }
+
+    // Delegate to existing classification
+    classify_argument_text(first_arg, param_names)
+}
+
 // ── Regex fallback parser (when typescript feature is disabled) ──
 
 #[cfg(not(feature = "typescript"))]
@@ -523,6 +661,10 @@ static FUNC_DEF_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 #[cfg(not(feature = "typescript"))]
+static EXPORT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(?:export\s+)").unwrap());
+
+#[cfg(not(feature = "typescript"))]
 impl LanguageParser for TypeScriptParser {
     fn language(&self) -> Language {
         Language::TypeScript
@@ -533,7 +675,10 @@ impl LanguageParser for TypeScriptParser {
         let file_path = PathBuf::from(path);
         let mut param_names = HashSet::new();
 
-        // Collect function parameter names
+        // Phase 0: Detect sanitizer assignments
+        detect_sanitizer_assignments(content, &mut parsed.sanitized_vars);
+
+        // Collect function parameter names + FunctionDef entries
         for cap in FUNC_DEF_RE.captures_iter(content) {
             let params_str = cap
                 .get(2)
@@ -548,6 +693,10 @@ impl LanguageParser for TypeScriptParser {
                 .map(|m| m.as_str())
                 .unwrap_or("");
 
+            let full_match = cap.get(0).map(|m| m.as_str()).unwrap_or("");
+            let is_exported = full_match.starts_with("export");
+
+            let mut func_params = Vec::new();
             for param in params_str.split(',') {
                 let param = param.trim();
                 if param.starts_with('{') || param.starts_with('[') {
@@ -559,12 +708,22 @@ impl LanguageParser for TypeScriptParser {
                 let param = param.trim_end_matches('?');
                 if !param.is_empty() && param != "this" {
                     param_names.insert(param.to_string());
+                    func_params.push(param.to_string());
                     parsed.function_params.push(FunctionParam {
                         function_name: func_name.to_string(),
                         param_name: param.to_string(),
                         location: regex_loc(&file_path, 0),
                     });
                 }
+            }
+
+            if !func_name.is_empty() {
+                parsed.function_defs.push(FunctionDef {
+                    name: func_name.to_string(),
+                    params: func_params,
+                    is_exported,
+                    location: regex_loc(&file_path, 0),
+                });
             }
         }
 
@@ -594,7 +753,29 @@ impl LanguageParser for TypeScriptParser {
             for cap in CALL_RE.captures_iter(line) {
                 let func_name = &cap[1];
                 let args_str = &cap[2];
-                let arg_source = classify_argument_text(args_str, &param_names);
+                let arg_source = classify_argument_with_sanitizers(
+                    args_str,
+                    &param_names,
+                    &parsed.sanitized_vars,
+                );
+
+                // Record CallSite
+                let all_args = args_str
+                    .split(',')
+                    .map(|a| {
+                        classify_argument_with_sanitizers(
+                            a.trim(),
+                            &param_names,
+                            &parsed.sanitized_vars,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                parsed.call_sites.push(CallSite {
+                    callee: func_name.to_string(),
+                    arguments: all_args,
+                    caller: None, // Regex path can't easily determine enclosing function
+                    location: regex_loc(&file_path, line_num),
+                });
 
                 if matches_pattern(func_name, &EXEC_PATTERNS) {
                     parsed.commands.push(CommandInvocation {
@@ -997,5 +1178,89 @@ const Component = ({ url }: { url: string }) => {
             parsed.network_operations[0].url_arg,
             ArgumentSource::Parameter { .. }
         ));
+    }
+
+    // ── Cross-file support tests ──
+
+    #[test]
+    fn extracts_function_defs() {
+        let code = r#"
+export async function readFileContent(filePath: string) {
+    return fs.readFile(filePath, "utf-8");
+}
+
+function internalHelper(x: number) {
+    return x + 1;
+}
+"#;
+        let parsed = TypeScriptParser
+            .parse_file(Path::new("lib.ts"), code)
+            .unwrap();
+        assert!(parsed.function_defs.len() >= 2);
+        let exported = parsed.function_defs.iter().find(|d| d.name == "readFileContent");
+        assert!(exported.is_some());
+        assert!(exported.unwrap().is_exported);
+        assert_eq!(exported.unwrap().params, vec!["filePath"]);
+
+        let internal = parsed.function_defs.iter().find(|d| d.name == "internalHelper");
+        assert!(internal.is_some());
+        assert!(!internal.unwrap().is_exported);
+    }
+
+    #[test]
+    fn extracts_call_sites() {
+        let code = r#"
+async function handler(args: any) {
+    const validPath = await validatePath(args.path);
+    const content = await readFileContent(validPath);
+    return content;
+}
+"#;
+        let parsed = TypeScriptParser
+            .parse_file(Path::new("index.ts"), code)
+            .unwrap();
+        assert!(!parsed.call_sites.is_empty());
+        let rfc_call = parsed.call_sites.iter().find(|cs| cs.callee == "readFileContent");
+        assert!(rfc_call.is_some(), "Should find readFileContent call site");
+    }
+
+    #[test]
+    fn detects_sanitizer_assignment() {
+        let code = r#"
+async function handler(args: any) {
+    const validPath = await validatePath(args.path);
+    const content = await readFileContent(validPath);
+    return content;
+}
+"#;
+        let parsed = TypeScriptParser
+            .parse_file(Path::new("index.ts"), code)
+            .unwrap();
+        assert!(parsed.sanitized_vars.contains("validPath"));
+
+        // The call to readFileContent(validPath) should classify validPath as Sanitized
+        let rfc_call = parsed.call_sites.iter().find(|cs| cs.callee == "readFileContent");
+        assert!(rfc_call.is_some());
+        let rfc = rfc_call.unwrap();
+        assert!(!rfc.arguments.is_empty());
+        assert!(
+            matches!(&rfc.arguments[0], ArgumentSource::Sanitized { .. }),
+            "validPath should be classified as Sanitized, got: {:?}",
+            rfc.arguments[0]
+        );
+    }
+
+    #[test]
+    fn sanitized_var_from_path_resolve() {
+        let code = r#"
+function processFile(rawPath: string) {
+    const safePath = path.resolve(rawPath);
+    fs.readFileSync(safePath, "utf-8");
+}
+"#;
+        let parsed = TypeScriptParser
+            .parse_file(Path::new("test.ts"), code)
+            .unwrap();
+        assert!(parsed.sanitized_vars.contains("safePath"));
     }
 }

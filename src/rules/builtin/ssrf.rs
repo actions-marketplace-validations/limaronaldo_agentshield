@@ -29,9 +29,9 @@ impl Detector for SsrfDetector {
                 ArgumentSource::Parameter { .. } => (true, Confidence::High),
                 ArgumentSource::Interpolated => (true, Confidence::Medium),
                 ArgumentSource::Unknown => (true, Confidence::Medium),
-                ArgumentSource::Literal(_) | ArgumentSource::EnvVar { .. } => {
-                    (false, Confidence::Low)
-                }
+                ArgumentSource::Literal(_)
+                | ArgumentSource::EnvVar { .. }
+                | ArgumentSource::Sanitized { .. } => (false, Confidence::Low),
             };
 
             if should_flag {

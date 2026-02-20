@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use super::{LanguageParser, ParsedFile};
+use super::{CallSite, FunctionDef, LanguageParser, ParsedFile};
+use crate::analysis::cross_file::is_sanitizer;
 use crate::error::Result;
 use crate::ir::execution_surface::*;
 use crate::ir::{ArgumentSource, Language, SourceLocation};
@@ -101,6 +102,11 @@ static ENV_ACCESS_RE: Lazy<Regex> = Lazy::new(|| {
 static FUNC_DEF_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?m)^\s*(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)").unwrap());
 
+// Sanitizer assignment: valid_path = validate_path(x) or valid_path = await validate_path(x)
+static SANITIZER_ASSIGN_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(\w+)\s*=\s*(?:await\s+)?(\w+(?:\.\w+)*)\s*\(").unwrap()
+});
+
 impl LanguageParser for PythonParser {
     fn language(&self) -> Language {
         Language::Python
@@ -110,17 +116,45 @@ impl LanguageParser for PythonParser {
         let mut parsed = ParsedFile::default();
         let file_path = PathBuf::from(path);
 
-        // Collect function parameter names for taint tracking
+        // Detect sanitizer assignments: safe_path = validate_path(x)
+        for cap in SANITIZER_ASSIGN_RE.captures_iter(content) {
+            let var_name = &cap[1];
+            let func_name = &cap[2];
+            if is_sanitizer(func_name) {
+                parsed.sanitized_vars.insert(var_name.to_string());
+            }
+        }
+
+        // Collect function parameter names + FunctionDef entries
         let mut param_names = std::collections::HashSet::new();
         for cap in FUNC_DEF_RE.captures_iter(content) {
-            let params = &cap[2];
-            for param in params.split(',') {
+            let func_name = &cap[1];
+            let params_str = &cap[2];
+            // In Python, functions starting with _ are conventionally private
+            let is_exported = !func_name.starts_with('_');
+
+            let mut func_params = Vec::new();
+            for param in params_str.split(',') {
                 let param = param.trim().split(':').next().unwrap_or("").trim();
                 let param = param.split('=').next().unwrap_or("").trim();
                 if !param.is_empty() && param != "self" && param != "cls" {
                     param_names.insert(param.to_string());
+                    func_params.push(param.to_string());
                 }
             }
+
+            // Find line number for this function def
+            let func_line = content[..cap.get(0).map(|m| m.start()).unwrap_or(0)]
+                .lines()
+                .count()
+                + 1;
+
+            parsed.function_defs.push(FunctionDef {
+                name: func_name.to_string(),
+                params: func_params,
+                is_exported,
+                location: loc(&file_path, func_line),
+            });
         }
 
         // Collect variable names bound to HTTP clients via async context managers
@@ -164,7 +198,19 @@ impl LanguageParser for PythonParser {
                 let func_name = &cap[1];
                 let args_str = &cap[2];
 
-                let arg_source = classify_argument(args_str, &param_names);
+                let arg_source = classify_argument(args_str, &param_names, &parsed.sanitized_vars);
+
+                // Record CallSite for cross-file analysis
+                let all_args = args_str
+                    .split(',')
+                    .map(|a| classify_argument(a.trim(), &param_names, &parsed.sanitized_vars))
+                    .collect::<Vec<_>>();
+                parsed.call_sites.push(CallSite {
+                    callee: func_name.to_string(),
+                    arguments: all_args,
+                    caller: None, // Could be improved with indentation tracking
+                    location: loc(&file_path, line_num),
+                });
 
                 // Subprocess/command execution
                 if SUBPROCESS_PATTERNS
@@ -278,7 +324,7 @@ impl LanguageParser for PythonParser {
             for cap in GITPYTHON_RE.captures_iter(line) {
                 let full_call = format!("{}.git.{}", &cap[1], &cap[2]);
                 let args_str = &cap[3];
-                let arg_source = classify_argument(args_str, &param_names);
+                let arg_source = classify_argument(args_str, &param_names, &parsed.sanitized_vars);
                 parsed.commands.push(CommandInvocation {
                     function: full_call,
                     command_arg: arg_source,
@@ -299,7 +345,7 @@ impl LanguageParser for PythonParser {
                     .get(line_idx + 1)
                     .map(|l| l.trim().trim_end_matches(','))
                     .unwrap_or("");
-                let arg_source = classify_argument(first_arg_str, &param_names);
+                let arg_source = classify_argument(first_arg_str, &param_names, &parsed.sanitized_vars);
 
                 // Check all pattern categories for partial calls
                 if SUBPROCESS_PATTERNS
@@ -396,11 +442,21 @@ impl LanguageParser for PythonParser {
 fn classify_argument(
     args_str: &str,
     param_names: &std::collections::HashSet<String>,
+    sanitized_vars: &std::collections::HashSet<String>,
 ) -> ArgumentSource {
     let first_arg = args_str.split(',').next().unwrap_or("").trim();
 
     if first_arg.is_empty() {
         return ArgumentSource::Unknown;
+    }
+
+    // Check if this is a sanitized variable first
+    let ident = first_arg.split('.').next().unwrap_or(first_arg);
+    let ident = ident.split('[').next().unwrap_or(ident);
+    if sanitized_vars.contains(ident) {
+        return ArgumentSource::Sanitized {
+            sanitizer: ident.to_string(),
+        };
     }
 
     // String literal
@@ -425,7 +481,6 @@ fn classify_argument(
     }
 
     // Known function parameter
-    let ident = first_arg.split('.').next().unwrap_or(first_arg);
     if param_names.contains(ident) {
         return ArgumentSource::Parameter {
             name: ident.to_string(),
@@ -616,6 +671,63 @@ def execute(cmd: str):
             parsed.commands.len(),
             1,
             "should detect multi-line subprocess.run() call"
+        );
+    }
+
+    // ── Cross-file support tests ──
+
+    #[test]
+    fn extracts_python_function_defs() {
+        let code = r#"
+def read_file(path: str) -> str:
+    with open(path) as f:
+        return f.read()
+
+def _internal_helper(x):
+    return x + 1
+"#;
+        let parsed = PythonParser.parse_file(Path::new("lib.py"), code).unwrap();
+        assert!(parsed.function_defs.len() >= 2);
+
+        let read_file = parsed.function_defs.iter().find(|d| d.name == "read_file");
+        assert!(read_file.is_some());
+        assert!(read_file.unwrap().is_exported); // no underscore prefix
+        assert_eq!(read_file.unwrap().params, vec!["path"]);
+
+        let helper = parsed.function_defs.iter().find(|d| d.name == "_internal_helper");
+        assert!(helper.is_some());
+        assert!(!helper.unwrap().is_exported); // underscore prefix = private
+    }
+
+    #[test]
+    fn detects_python_sanitizer_assignment() {
+        let code = r#"
+def handler(raw_path: str):
+    safe_path = os.path.realpath(raw_path)
+    with open(safe_path) as f:
+        return f.read()
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert!(parsed.sanitized_vars.contains("safe_path"));
+    }
+
+    #[test]
+    fn extracts_python_call_sites() {
+        let code = r#"
+def handler(args):
+    safe_path = os.path.realpath(args.path)
+    content = read_file(safe_path)
+    return content
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        let rf_call = parsed.call_sites.iter().find(|cs| cs.callee == "read_file");
+        assert!(rf_call.is_some(), "Should find read_file call site");
+        let rf = rf_call.unwrap();
+        assert!(!rf.arguments.is_empty());
+        assert!(
+            matches!(&rf.arguments[0], ArgumentSource::Sanitized { .. }),
+            "safe_path should be Sanitized, got: {:?}",
+            rf.arguments[0]
         );
     }
 }

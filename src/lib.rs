@@ -170,4 +170,34 @@ mod integration_tests {
         assert!(report.findings.iter().any(|f| f.rule_id == "SHIELD-002"));
         assert!(!report.verdict.pass);
     }
+
+    #[test]
+    fn safe_filesystem_no_file_access_findings() {
+        // This fixture has a handler that validates paths via validatePath()
+        // before passing them to helper functions. Cross-file analysis should
+        // downgrade the helpers' operations from tainted to sanitized.
+        let opts = ScanOptions::default();
+        let report = scan(
+            Path::new("tests/fixtures/mcp_servers/safe_filesystem"),
+            &opts,
+        )
+        .unwrap();
+
+        let file_access_findings: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|f| f.rule_id == "SHIELD-004")
+            .collect();
+
+        assert!(
+            file_access_findings.is_empty(),
+            "Expected 0 SHIELD-004 findings (cross-file sanitization should eliminate FPs), \
+             but got {}: {:?}",
+            file_access_findings.len(),
+            file_access_findings
+                .iter()
+                .map(|f| &f.message)
+                .collect::<Vec<_>>()
+        );
+    }
 }

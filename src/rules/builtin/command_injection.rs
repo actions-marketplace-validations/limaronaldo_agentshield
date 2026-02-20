@@ -36,6 +36,7 @@ impl Detector for CommandInjectionDetector {
                     (has_expansion, Confidence::Medium)
                 }
                 ArgumentSource::EnvVar { .. } => (true, Confidence::Medium),
+                ArgumentSource::Sanitized { .. } => (false, Confidence::High),
             };
 
             if should_flag {
@@ -49,6 +50,7 @@ impl Detector for CommandInjectionDetector {
                         format!("literal with shell expansion: '{val}'")
                     }
                     ArgumentSource::Unknown => "unknown source".into(),
+                    ArgumentSource::Sanitized { .. } => unreachable!(),
                 };
 
                 findings.push(Finding {

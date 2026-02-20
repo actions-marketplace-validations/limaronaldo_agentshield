@@ -5,6 +5,26 @@ All notable changes to AgentShield will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-02-20
+
+### Added
+
+- **Cross-file validation tracking (IBVI-482)** — post-parsing analysis phase that eliminates false positives from helper functions receiving already-validated input
+  - New `Sanitized { sanitizer }` variant in `ArgumentSource` — `is_tainted()` returns `false`, zero detector changes needed
+  - Sanitizer registry recognizes `validatePath`, `path.resolve`, `os.path.realpath`, `parseInt`, `URL.parse`, and pattern-based matches (`validate*Path`, `sanitize*`)
+  - TypeScript parser extracts `FunctionDef`, `CallSite`, and `sanitized_vars` from both tree-sitter and regex paths
+  - Python parser extracts same structures with Python-specific conventions (`_` prefix = non-exported)
+  - `apply_cross_file_sanitization()` algorithm: when ALL call sites pass sanitized arguments, downgrades callee parameters from tainted to sanitized
+  - Conservative: exported functions with zero discovered call sites stay tainted
+  - 3-phase adapter pipeline (parse → cross-file analysis → merge) in both MCP and OpenClaw adapters
+  - New `safe_filesystem` test fixture (3 TypeScript files mimicking Anthropic's filesystem MCP server pattern)
+  - Integration test verifying 0 SHIELD-004 findings on the safe filesystem fixture
+  - 14 new tests (83 total, up from 69)
+
+### Changed
+
+- Version bump: 0.2.1 → 0.2.2
+
 ## [0.2.1] - 2026-02-20
 
 ### Fixed
@@ -108,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Typosquat detection via Levenshtein distance against popular packages
   - Unpinned dependency version detection
 
+[0.2.2]: https://github.com/limaronaldo/agentshield/releases/tag/v0.2.2
 [0.2.1]: https://github.com/limaronaldo/agentshield/releases/tag/v0.2.1
 [0.2.0]: https://github.com/limaronaldo/agentshield/releases/tag/v0.2.0
 [0.1.0]: https://github.com/limaronaldo/agentshield/releases/tag/v0.1.0

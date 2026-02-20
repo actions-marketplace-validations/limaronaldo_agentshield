@@ -31,7 +31,7 @@ impl Detector for ArbitraryFileAccessDetector {
                     ArgumentSource::Interpolated => "interpolated string".into(),
                     ArgumentSource::Unknown => "unknown source".into(),
                     ArgumentSource::EnvVar { name } => format!("env var '{name}'"),
-                    ArgumentSource::Literal(_) => continue,
+                    ArgumentSource::Literal(_) | ArgumentSource::Sanitized { .. } => continue,
                 };
 
                 let confidence = match &file_op.path_arg {

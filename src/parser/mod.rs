@@ -3,11 +3,12 @@ pub mod python;
 pub mod shell;
 pub mod typescript;
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::error::Result;
 use crate::ir::execution_surface::*;
-use crate::ir::{Language, SourceLocation};
+use crate::ir::{ArgumentSource, Language, SourceLocation};
 
 /// Result of parsing a single source file.
 #[derive(Debug, Clone, Default)]
@@ -19,6 +20,12 @@ pub struct ParsedFile {
     pub dynamic_exec: Vec<DynamicExec>,
     /// Names of function parameters (for tool argument tracking).
     pub function_params: Vec<FunctionParam>,
+    /// Function definitions discovered in source code.
+    pub function_defs: Vec<FunctionDef>,
+    /// Function call sites discovered in source code.
+    pub call_sites: Vec<CallSite>,
+    /// Variables holding sanitized values (e.g., `validPath = validatePath(x)`).
+    pub sanitized_vars: HashSet<String>,
 }
 
 /// A function parameter discovered in source code.
@@ -26,6 +33,27 @@ pub struct ParsedFile {
 pub struct FunctionParam {
     pub function_name: String,
     pub param_name: String,
+    pub location: SourceLocation,
+}
+
+/// A function definition discovered in source code.
+#[derive(Debug, Clone)]
+pub struct FunctionDef {
+    pub name: String,
+    pub params: Vec<String>,
+    pub is_exported: bool,
+    pub location: SourceLocation,
+}
+
+/// A function call site discovered in source code.
+#[derive(Debug, Clone)]
+pub struct CallSite {
+    /// The function being called.
+    pub callee: String,
+    /// Arguments passed, each classified.
+    pub arguments: Vec<ArgumentSource>,
+    /// The enclosing function name, if any.
+    pub caller: Option<String>,
     pub location: SourceLocation,
 }
 

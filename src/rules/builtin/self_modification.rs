@@ -87,6 +87,9 @@ impl Detector for SelfModificationDetector {
                         &file_op.location,
                     ));
                 }
+                crate::ir::ArgumentSource::Sanitized { .. } => {
+                    // Sanitized paths have been validated — skip
+                }
             }
         }
 

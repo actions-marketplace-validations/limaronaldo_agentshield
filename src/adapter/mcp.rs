@@ -1,5 +1,6 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use crate::analysis::cross_file::apply_cross_file_sanitization;
 use crate::error::Result;
 use crate::ir::execution_surface::ExecutionSurface;
 use crate::ir::*;
@@ -82,19 +83,29 @@ impl super::Adapter for McpAdapter {
         // Collect source files
         collect_source_files(root, &mut source_files)?;
 
-        // Parse each source file
+        // Phase 1: Parse each source file, collecting results for cross-file analysis.
+        let mut parsed_files: Vec<(PathBuf, parser::ParsedFile)> = Vec::new();
         for sf in &source_files {
             if let Some(parser) = parser::parser_for_language(sf.language) {
                 if let Ok(parsed) = parser.parse_file(&sf.path, &sf.content) {
-                    execution.commands.extend(parsed.commands);
-                    execution.file_operations.extend(parsed.file_operations);
-                    execution
-                        .network_operations
-                        .extend(parsed.network_operations);
-                    execution.env_accesses.extend(parsed.env_accesses);
-                    execution.dynamic_exec.extend(parsed.dynamic_exec);
+                    parsed_files.push((sf.path.clone(), parsed));
                 }
             }
+        }
+
+        // Phase 2: Cross-file sanitizer-aware analysis — downgrade operations
+        // in functions that are only called with sanitized arguments.
+        apply_cross_file_sanitization(&mut parsed_files);
+
+        // Phase 3: Merge parsed results into execution surface.
+        for (_, parsed) in parsed_files {
+            execution.commands.extend(parsed.commands);
+            execution.file_operations.extend(parsed.file_operations);
+            execution
+                .network_operations
+                .extend(parsed.network_operations);
+            execution.env_accesses.extend(parsed.env_accesses);
+            execution.dynamic_exec.extend(parsed.dynamic_exec);
         }
 
         // Parse tool definitions from JSON if available

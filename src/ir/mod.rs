@@ -136,11 +136,13 @@ pub enum ArgumentSource {
     Interpolated,
     /// Unable to determine statically.
     Unknown,
+    /// Parameter was sanitized before being passed (e.g., via `validatePath`).
+    Sanitized { sanitizer: String },
 }
 
 impl ArgumentSource {
     /// Whether this source is potentially attacker-controlled.
     pub fn is_tainted(&self) -> bool {
-        !matches!(self, Self::Literal(_))
+        !matches!(self, Self::Literal(_) | Self::Sanitized { .. })
     }
 }

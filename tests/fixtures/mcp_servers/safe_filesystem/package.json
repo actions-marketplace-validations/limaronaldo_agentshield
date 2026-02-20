@@ -1,0 +1,8 @@
+{
+  "name": "safe-filesystem-mcp",
+  "version": "1.0.0",
+  "description": "Filesystem MCP server with validated paths — no false positives expected",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
