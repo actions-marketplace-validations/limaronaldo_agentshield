@@ -1,0 +1,74 @@
+# AgentShield for VS Code
+
+**Inline security findings for AI agent extensions — MCP, LangChain, CrewAI, OpenClaw.**
+
+AgentShield scans your AI agent tools for command injection, SSRF, credential exfiltration, and 9 other vulnerability patterns. Findings appear as inline squiggles and in the Problems panel.
+
+## Features
+
+- **Inline diagnostics** — security findings shown directly in the editor with severity-colored underlines
+- **Automatic scanning** — rescans on file save (debounced, configurable)
+- **Status bar** — shows scan status and finding count
+- **12 detectors** — SHIELD-001 through SHIELD-012 covering command injection, SSRF, credential leaks, arbitrary file access, and more
+- **4 frameworks** — MCP servers, OpenClaw skills, CrewAI agents, LangChain tools
+
+## Requirements
+
+AgentShield CLI must be installed:
+
+```bash
+# From crates.io
+cargo install agent-shield
+
+# Or download from releases
+# https://github.com/limaronaldo/agentshield/releases/latest
+```
+
+## Extension Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `agentshield.binaryPath` | `""` | Path to binary (empty = use PATH) |
+| `agentshield.ignoreTests` | `true` | Skip test files during scanning |
+| `agentshield.scanOnSave` | `true` | Auto-scan after saving files |
+| `agentshield.scanOnOpen` | `true` | Scan workspace when opened |
+| `agentshield.timeout` | `30` | Scan timeout in seconds |
+
+## Usage
+
+1. Open a project containing AI agent tools (MCP server, LangChain tools, etc.)
+2. The extension auto-scans on open and shows findings inline
+3. Use `Cmd+Shift+P` > **AgentShield: Scan Workspace** to trigger a manual scan
+4. Click the status bar item to rescan
+5. Click a finding's rule ID to view documentation
+
+## Severity Mapping
+
+| AgentShield | VS Code | Color |
+|-------------|---------|-------|
+| Critical / High | Error | Red underline |
+| Medium | Warning | Yellow underline |
+| Low / Info | Information | Blue underline |
+
+## Detection Rules
+
+| ID | Name | Severity |
+|----|------|----------|
+| SHIELD-001 | Command Injection | Critical |
+| SHIELD-002 | Credential Exfiltration | Critical |
+| SHIELD-003 | SSRF | High |
+| SHIELD-004 | Arbitrary File Access | High |
+| SHIELD-005 | Runtime Package Install | High |
+| SHIELD-006 | Self-Modification | High |
+| SHIELD-007 | Prompt Injection Surface | Medium |
+| SHIELD-008 | Excessive Permissions | Medium |
+| SHIELD-009 | Unpinned Dependencies | Medium |
+| SHIELD-010 | Typosquat Detection | Medium |
+| SHIELD-011 | Dynamic Code Execution | Critical |
+| SHIELD-012 | No Lockfile | Low |
+
+## Links
+
+- [AgentShield on GitHub](https://github.com/limaronaldo/agentshield)
+- [Detection Rules Documentation](https://github.com/limaronaldo/agentshield/blob/main/docs/RULES.md)
+- [GitHub Action](https://github.com/marketplace/actions/agentshield-security-scanner)

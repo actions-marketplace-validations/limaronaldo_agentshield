@@ -1,0 +1,85 @@
+{
+  "name": "agentshield",
+  "displayName": "AgentShield",
+  "description": "Security scanner for AI agent extensions — inline findings for MCP, LangChain, CrewAI, OpenClaw",
+  "version": "0.1.0",
+  "publisher": "limaronaldo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/limaronaldo/agentshield"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "security",
+    "mcp",
+    "langchain",
+    "crewai",
+    "ai",
+    "agent",
+    "sarif"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [
+    "workspaceContains:**/package.json",
+    "workspaceContains:**/pyproject.toml",
+    "workspaceContains:**/SKILL.md",
+    "workspaceContains:**/langgraph.json"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentshield.scan",
+        "title": "AgentShield: Scan Workspace"
+      }
+    ],
+    "configuration": {
+      "title": "AgentShield",
+      "properties": {
+        "agentshield.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to agentshield binary (leave empty to use PATH)"
+        },
+        "agentshield.ignoreTests": {
+          "type": "boolean",
+          "default": true,
+          "description": "Skip test files during scanning"
+        },
+        "agentshield.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan after saving files"
+        },
+        "agentshield.scanOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan workspace when opened"
+        },
+        "agentshield.timeout": {
+          "type": "number",
+          "default": 30,
+          "description": "Scan timeout in seconds"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  }
+}
