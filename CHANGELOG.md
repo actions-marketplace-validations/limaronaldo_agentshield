@@ -29,7 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SARIF `startColumn` now 1-based (was 0-based, rejected by GitHub Code Scanning)
+- SARIF `fixes[]` replaced with `properties.remediation` (missing required `artifactChanges`)
+- SARIF skips location-less findings (supply-chain rules SHIELD-009, -012 have no source location)
 - Dockerfile now copies `benches/` directory (build failed when Cargo.toml referenced missing bench)
+- Dockerfile bumped to `rust:1.85-slim` (tree-sitter-typescript requires edition2024)
 
 ## [0.1.0] - 2026-02-13
 
