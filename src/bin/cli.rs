@@ -47,6 +47,10 @@ enum Commands {
         /// Write output to file instead of stdout
         #[arg(long, short = 'o')]
         output: Option<PathBuf>,
+
+        /// Skip test files (test/, tests/, __tests__/, *.test.ts, *.spec.ts, etc.)
+        #[arg(long)]
+        ignore_tests: bool,
     },
 
     /// List all available detection rules
@@ -74,7 +78,8 @@ fn main() {
             format,
             fail_on,
             output,
-        } => cmd_scan(path, config, format, fail_on, output),
+            ignore_tests,
+        } => cmd_scan(path, config, format, fail_on, output, ignore_tests),
         Commands::ListRules { format } => cmd_list_rules(format),
         Commands::Init { force } => cmd_init(force),
     };
@@ -94,6 +99,7 @@ fn cmd_scan(
     format_str: String,
     fail_on_str: Option<String>,
     output_path: Option<PathBuf>,
+    ignore_tests: bool,
 ) -> Result<i32, agentshield::error::ShieldError> {
     let format = OutputFormat::from_str_lenient(&format_str).unwrap_or_else(|| {
         eprintln!("Warning: unknown format '{}', using console", format_str);
@@ -112,6 +118,7 @@ fn cmd_scan(
         config_path: config,
         format,
         fail_on_override: fail_on,
+        ignore_tests,
     };
 
     let report = agentshield::scan(&path, &options)?;

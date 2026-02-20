@@ -10,6 +10,16 @@ use crate::rules::policy::Policy;
 pub struct Config {
     #[serde(default)]
     pub policy: Policy,
+    #[serde(default)]
+    pub scan: ScanConfig,
+}
+
+/// `[scan]` section of the config file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScanConfig {
+    /// Skip test files when true.
+    #[serde(default)]
+    pub ignore_tests: bool,
 }
 
 impl Config {
@@ -38,6 +48,10 @@ fail_on = "high"
 # Per-rule severity overrides.
 # [policy.overrides]
 # "SHIELD-012" = "info"
+
+# [scan]
+# Skip test files (test/, tests/, __tests__/, *.test.ts, *.spec.ts, etc.).
+# ignore_tests = false
 "#
     }
 }

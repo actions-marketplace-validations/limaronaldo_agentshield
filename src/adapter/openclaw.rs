@@ -19,7 +19,7 @@ impl super::Adapter for OpenClawAdapter {
         root.join("SKILL.md").exists()
     }
 
-    fn load(&self, root: &Path) -> Result<Vec<ScanTarget>> {
+    fn load(&self, root: &Path, ignore_tests: bool) -> Result<Vec<ScanTarget>> {
         let name = root
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -40,6 +40,11 @@ impl super::Adapter for OpenClawAdapter {
             if !path.is_file() {
                 continue;
             }
+
+            if ignore_tests && super::mcp::is_test_file(path) {
+                continue;
+            }
+
             let ext = path
                 .extension()
                 .map(|e| e.to_string_lossy().to_string())

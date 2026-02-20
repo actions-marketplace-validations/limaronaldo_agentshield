@@ -83,10 +83,11 @@ pub fn apply_cross_file_sanitization(
     let mut func_defs: HashMap<String, Vec<(usize, Vec<String>, bool)>> = HashMap::new();
     for (idx, (_, parsed)) in parsed_files.iter().enumerate() {
         for def in &parsed.function_defs {
-            func_defs
-                .entry(def.name.clone())
-                .or_default()
-                .push((idx, def.params.clone(), def.is_exported));
+            func_defs.entry(def.name.clone()).or_default().push((
+                idx,
+                def.params.clone(),
+                def.is_exported,
+            ));
         }
     }
 
@@ -126,11 +127,7 @@ pub fn apply_cross_file_sanitization(
                 });
 
                 if all_safe {
-                    params_to_downgrade.push((
-                        *file_idx,
-                        param_name.clone(),
-                        func_name.clone(),
-                    ));
+                    params_to_downgrade.push((*file_idx, param_name.clone(), func_name.clone()));
                 }
             }
         }
@@ -259,7 +256,10 @@ mod tests {
         // Verify the operation was downgraded
         let lib_ops = &files[1].1.file_operations;
         assert!(!lib_ops[0].path_arg.is_tainted());
-        assert!(matches!(&lib_ops[0].path_arg, ArgumentSource::Sanitized { .. }));
+        assert!(matches!(
+            &lib_ops[0].path_arg,
+            ArgumentSource::Sanitized { .. }
+        ));
     }
 
     #[test]
@@ -362,9 +362,7 @@ mod tests {
         });
         // Two file operations, one per param
         file_b.file_operations.push(FileOperation {
-            path_arg: ArgumentSource::Parameter {
-                name: "src".into(),
-            },
+            path_arg: ArgumentSource::Parameter { name: "src".into() },
             operation: FileOpType::Read,
             location: loc("lib.ts", 3),
         });

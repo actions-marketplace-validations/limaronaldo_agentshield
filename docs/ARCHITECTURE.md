@@ -30,14 +30,14 @@ Each adapter implements:
 
 ```rust
 pub trait Adapter: Send + Sync {
-    fn name(&self) -> &str;
+    fn framework(&self) -> Framework;
     fn detect(&self, root: &Path) -> bool;
-    fn load(&self, root: &Path) -> Result<Vec<ScanTarget>>;
+    fn load(&self, root: &Path, ignore_tests: bool) -> Result<Vec<ScanTarget>>;
 }
 ```
 
 - `detect()` checks for framework-specific files (e.g., `package.json` with MCP SDK)
-- `load()` uses parsers to populate a `ScanTarget`
+- `load()` uses parsers to populate a `ScanTarget`; when `ignore_tests` is true, test files are filtered out before parsing via `is_test_file()`
 - **All matching adapters run** — a project can be both an MCP server and contain OpenClaw skills
 
 ### 2. Parser (Language Analysis)
@@ -194,7 +194,7 @@ Detectors read only from the IR — they never access the filesystem directly.
 
 ```
 src/rules/policy.rs — PolicyConfig, PolicyVerdict
-src/config/mod.rs   — .agentshield.toml parsing
+src/config/mod.rs   — .agentshield.toml parsing (policy + scan sections)
 ```
 
 Policy is separate from detection:
@@ -219,9 +219,9 @@ All formatters receive `(&[Finding], &PolicyVerdict)` and produce a `String`.
 ## Data Flow
 
 ```
-                    ┌─────────────────────────────┐
-                    │  auto_detect_and_load(path)  │
-                    └──────────┬──────────────────┘
+                    ┌──────────────────────────────────────────┐
+                    │  auto_detect_and_load(path, ignore_tests) │
+                    └──────────┬───────────────────────────────┘
                                │
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
@@ -232,6 +232,7 @@ All formatters receive `(&[Finding], &PolicyVerdict)` and produce a `String`.
              │               │
              │  3-phase pipeline per adapter:
              │
+             │  Phase 0: Walk files (skip test files if ignore_tests)
              │  Phase 1: Parse each source file
              │           ↓ Vec<(PathBuf, ParsedFile)>
              │
@@ -279,6 +280,27 @@ All public APIs return `Result<T, ShieldError>`. Error variants:
 - `Serialization` — JSON/SARIF output errors
 
 Exit codes: `0` = pass, `1` = findings above threshold, `2` = scan error.
+
+## Test File Exclusion
+
+```
+src/adapter/mcp.rs — is_test_file() helper (shared by all adapters)
+```
+
+When `--ignore-tests` is enabled (via CLI flag, `.agentshield.toml`, or `ScanOptions`), test files
+are excluded at the file-walking stage — before parsing. This is the earliest possible point in the
+pipeline and avoids wasting time parsing files that will be ignored.
+
+`is_test_file(path)` matches:
+- **Directories:** `test/`, `tests/`, `__tests__/`, `__pycache__/`
+- **Suffixes:** `.test.{ts,js,tsx,jsx,py}`, `.spec.{ts,js,tsx,jsx}`
+- **Prefixes:** `test_*.py` (pytest convention)
+- **Config files:** `conftest.py`, `jest.config.*`, `vitest.config.*`, `pytest.ini`, `setup.cfg`
+
+The flag can be set via three channels (OR'd together):
+1. CLI: `--ignore-tests`
+2. Config: `[scan] ignore_tests = true`
+3. Library: `ScanOptions { ignore_tests: true, .. }`
 
 ## Performance Characteristics
 

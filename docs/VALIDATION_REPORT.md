@@ -98,9 +98,9 @@ The scanner can't see the call-site validation because it's in a different file 
 **Distribution:** 8 in production code (all post-validation), 46 in test files.
 
 **Fix options:**
-- Cross-file taint analysis (IBVI-482) would resolve this
-- `--ignore-tests` flag to skip test directories
-- `validatePath()` could be recognized as a sanitizer pattern
+- ~~Cross-file taint analysis (IBVI-482)~~ — **Done v0.2.2** (eliminates 8 production code FPs)
+- ~~`--ignore-tests` flag to skip test directories~~ — **Done v0.2.3** (eliminates 46 test file FPs)
+- ~~`validatePath()` could be recognized as a sanitizer pattern~~ — **Done v0.2.2** (sanitizer registry)
 
 ### FP-2: `filesystem` server — 33 SHIELD-006 findings
 
@@ -148,9 +148,9 @@ The reference servers don't commit lockfiles (they use a monorepo root lockfile)
 | **P0** | ~~Parser panic on single-char strings~~ | **Fixed** | Done |
 | **P1** | ~~Async HTTP client detection (FN-1)~~ | **Fixed** — fetch server: 4 findings | Done |
 | **P1** | ~~Library command abstractions — GitPython (FN-2)~~ | **Fixed** — git server: 9 findings | Done |
-| **P2** | Test file exclusion flag | Medium — reduces noise by ~60% | Low |
+| **P2** | ~~Test file exclusion flag~~ | **Fixed v0.2.3** — `--ignore-tests` flag | Done |
 | **P2** | ~~`vitest` allowlist (FP-4)~~ | **Fixed** — known-safe packages allowlist | Done |
-| **P3** | Cross-file validation tracking (FP-1) | High — but very complex | High |
+| **P3** | ~~Cross-file validation tracking (FP-1)~~ | **Fixed v0.2.2** — cross-file sanitizer analysis | Done |
 
 ---
 
@@ -217,7 +217,7 @@ The v0.2.0 scan of Anthropic's filesystem server produced:
 
 With v0.2.2 cross-file analysis, the production code findings (8 SHIELD-004 + SHIELD-006 in non-test files) should be eliminated because all call sites pass through `validatePath()`.
 
-Test file findings (~79) remain — these need the `--ignore-tests` feature (not yet implemented).
+Test file findings (~79) remain with default settings — use `--ignore-tests` to exclude them (implemented in v0.2.3).
 
 ### Updated Improvement Priorities
 
@@ -228,4 +228,4 @@ Test file findings (~79) remain — these need the `--ignore-tests` feature (not
 | **P1** | ~~GitPython command detection~~ | Fixed v0.2.1 | Done |
 | **P2** | ~~Typosquat allowlist~~ | Fixed v0.2.1 | Done |
 | **P3** | ~~Cross-file validation tracking~~ | Fixed v0.2.2 | Done |
-| **P2** | Test file exclusion (`--ignore-tests`) | Reduces noise ~60% | Pending |
+| **P2** | ~~Test file exclusion (`--ignore-tests`)~~ | ~~Reduces noise ~60%~~ | **Done v0.2.3** |

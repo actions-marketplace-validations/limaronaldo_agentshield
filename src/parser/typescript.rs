@@ -410,15 +410,14 @@ fn walk_node(
 
             // Classify all arguments (not just the first) for CallSite recording
             let args_node = node.child_by_field_name("arguments");
-            let all_arg_sources = classify_all_arguments(
-                args_node,
-                source,
-                param_names,
-                &parsed.sanitized_vars,
-            );
+            let all_arg_sources =
+                classify_all_arguments(args_node, source, param_names, &parsed.sanitized_vars);
 
             // First argument source for existing detector logic
-            let arg_source = all_arg_sources.first().cloned().unwrap_or(ArgumentSource::Unknown);
+            let arg_source = all_arg_sources
+                .first()
+                .cloned()
+                .unwrap_or(ArgumentSource::Unknown);
 
             // Record CallSite for cross-file analysis
             let caller_name = find_enclosing_function(node, source);
@@ -661,8 +660,7 @@ static FUNC_DEF_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 #[cfg(not(feature = "typescript"))]
-static EXPORT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(?:export\s+)").unwrap());
+static EXPORT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?:export\s+)").unwrap());
 
 #[cfg(not(feature = "typescript"))]
 impl LanguageParser for TypeScriptParser {
@@ -1197,12 +1195,18 @@ function internalHelper(x: number) {
             .parse_file(Path::new("lib.ts"), code)
             .unwrap();
         assert!(parsed.function_defs.len() >= 2);
-        let exported = parsed.function_defs.iter().find(|d| d.name == "readFileContent");
+        let exported = parsed
+            .function_defs
+            .iter()
+            .find(|d| d.name == "readFileContent");
         assert!(exported.is_some());
         assert!(exported.unwrap().is_exported);
         assert_eq!(exported.unwrap().params, vec!["filePath"]);
 
-        let internal = parsed.function_defs.iter().find(|d| d.name == "internalHelper");
+        let internal = parsed
+            .function_defs
+            .iter()
+            .find(|d| d.name == "internalHelper");
         assert!(internal.is_some());
         assert!(!internal.unwrap().is_exported);
     }
@@ -1220,7 +1224,10 @@ async function handler(args: any) {
             .parse_file(Path::new("index.ts"), code)
             .unwrap();
         assert!(!parsed.call_sites.is_empty());
-        let rfc_call = parsed.call_sites.iter().find(|cs| cs.callee == "readFileContent");
+        let rfc_call = parsed
+            .call_sites
+            .iter()
+            .find(|cs| cs.callee == "readFileContent");
         assert!(rfc_call.is_some(), "Should find readFileContent call site");
     }
 
@@ -1239,7 +1246,10 @@ async function handler(args: any) {
         assert!(parsed.sanitized_vars.contains("validPath"));
 
         // The call to readFileContent(validPath) should classify validPath as Sanitized
-        let rfc_call = parsed.call_sites.iter().find(|cs| cs.callee == "readFileContent");
+        let rfc_call = parsed
+            .call_sites
+            .iter()
+            .find(|cs| cs.callee == "readFileContent");
         assert!(rfc_call.is_some());
         let rfc = rfc_call.unwrap();
         assert!(!rfc.arguments.is_empty());

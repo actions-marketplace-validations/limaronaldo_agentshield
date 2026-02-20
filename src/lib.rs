@@ -40,6 +40,8 @@ pub struct ScanOptions {
     pub format: OutputFormat,
     /// CLI override for fail_on threshold.
     pub fail_on_override: Option<rules::Severity>,
+    /// Skip test files (test/, tests/, *.test.ts, *.spec.ts, etc.).
+    pub ignore_tests: bool,
 }
 
 impl Default for ScanOptions {
@@ -48,6 +50,7 @@ impl Default for ScanOptions {
             config_path: None,
             format: OutputFormat::Console,
             fail_on_override: None,
+            ignore_tests: false,
         }
     }
 }
@@ -75,7 +78,8 @@ pub fn scan(path: &Path, options: &ScanOptions) -> Result<ScanReport> {
     }
 
     // Auto-detect framework and load IR
-    let targets = adapter::auto_detect_and_load(path)?;
+    let ignore_tests = options.ignore_tests || config.scan.ignore_tests;
+    let targets = adapter::auto_detect_and_load(path, ignore_tests)?;
 
     // Run detectors on all targets
     let engine = RuleEngine::new();

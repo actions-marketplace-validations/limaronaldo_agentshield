@@ -16,7 +16,8 @@ pub trait Adapter: Send + Sync {
     fn detect(&self, root: &Path) -> bool;
 
     /// Load artifacts from the directory into scan targets.
-    fn load(&self, root: &Path) -> Result<Vec<ScanTarget>>;
+    /// When `ignore_tests` is true, test files are excluded before parsing.
+    fn load(&self, root: &Path, ignore_tests: bool) -> Result<Vec<ScanTarget>>;
 }
 
 /// All registered adapters.
@@ -31,13 +32,13 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
 ///
 /// Repos may contain both MCP and OpenClaw artifacts — all matching
 /// adapters contribute targets rather than stopping at the first match.
-pub fn auto_detect_and_load(root: &Path) -> Result<Vec<ScanTarget>> {
+pub fn auto_detect_and_load(root: &Path, ignore_tests: bool) -> Result<Vec<ScanTarget>> {
     let adapters = all_adapters();
     let mut all_targets = Vec::new();
 
     for adapter in &adapters {
         if adapter.detect(root) {
-            match adapter.load(root) {
+            match adapter.load(root, ignore_tests) {
                 Ok(targets) => all_targets.extend(targets),
                 Err(e) => {
                     tracing::warn!(

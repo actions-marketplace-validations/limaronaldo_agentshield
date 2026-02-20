@@ -49,16 +49,16 @@ const POPULAR_PYTHON: &[&str] = &[
 /// package but are themselves legitimate. Prevents false positives like
 /// "vitest" being flagged as a typosquat of "pytest".
 const KNOWN_SAFE: &[&str] = &[
-    "vitest",    // JS test runner, distance 2 from "pytest"
-    "esbuild",   // JS bundler
-    "bun",       // JS runtime
-    "deno",      // JS runtime
-    "pnpm",      // JS package manager
-    "yarn",      // JS package manager
-    "tsx",       // TS exec
-    "tsup",      // TS bundler
-    "vite",      // JS build tool
-    "nuxt",      // Vue framework, distance 1 from "next"
+    "vitest",  // JS test runner, distance 2 from "pytest"
+    "esbuild", // JS bundler
+    "bun",     // JS runtime
+    "deno",    // JS runtime
+    "pnpm",    // JS package manager
+    "yarn",    // JS package manager
+    "tsx",     // TS exec
+    "tsup",    // TS bundler
+    "vite",    // JS build tool
+    "nuxt",    // Vue framework, distance 1 from "next"
 ];
 
 /// Popular npm packages to compare against.
@@ -249,7 +249,10 @@ mod tests {
             location: None,
         }]);
         let findings = TyposquatDetector.run(&target);
-        assert!(findings.is_empty(), "vitest should not be flagged as typosquat of pytest");
+        assert!(
+            findings.is_empty(),
+            "vitest should not be flagged as typosquat of pytest"
+        );
     }
 
     #[test]
@@ -264,6 +267,9 @@ mod tests {
             location: None,
         }]);
         let findings = TyposquatDetector.run(&target);
-        assert!(findings.is_empty(), "nuxt should not be flagged as typosquat of next");
+        assert!(
+            findings.is_empty(),
+            "nuxt should not be flagged as typosquat of next"
+        );
     }
 }

@@ -58,8 +58,7 @@ pub fn render(findings: &[Finding], target_name: &str) -> Result<String> {
             });
 
             if let Some(remediation) = &f.remediation {
-                result["properties"] =
-                    json!({ "remediation": remediation });
+                result["properties"] = json!({ "remediation": remediation });
             }
 
             Some(result)

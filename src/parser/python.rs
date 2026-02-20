@@ -30,9 +30,8 @@ static SUBPROCESS_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| {
 
 // GitPython's `repo.git.*` methods are dynamic dispatchers that execute
 // `git <method> ...` as shell commands. We match the `.git.` segment.
-static GITPYTHON_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)(\w+)\.git\.(\w+)\s*\(([^)]*)\)").unwrap()
-});
+static GITPYTHON_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)(\w+)\.git\.(\w+)\s*\(([^)]*)\)").unwrap());
 
 static NETWORK_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| {
     vec![
@@ -58,7 +57,9 @@ static NETWORK_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| {
 // Checked separately from NETWORK_PATTERNS because the caller object is a
 // variable, not a known module.
 static HTTP_CLIENT_METHODS: Lazy<Vec<&str>> = Lazy::new(|| {
-    vec!["get", "post", "put", "patch", "delete", "head", "options", "request", "fetch", "send"]
+    vec![
+        "get", "post", "put", "patch", "delete", "head", "options", "request", "fetch", "send",
+    ]
 });
 
 // Regex to detect async context managers that produce HTTP clients.
@@ -66,7 +67,7 @@ static HTTP_CLIENT_METHODS: Lazy<Vec<&str>> = Lazy::new(|| {
 //          `async with aiohttp.ClientSession(...) as <name>:`
 static HTTP_CLIENT_CTX_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?m)async\s+with\s+(?:\w+\.)*(?:AsyncClient|ClientSession)\s*\([^)]*\)\s+as\s+(\w+)"
+        r"(?m)async\s+with\s+(?:\w+\.)*(?:AsyncClient|ClientSession)\s*\([^)]*\)\s+as\s+(\w+)",
     )
     .unwrap()
 });
@@ -103,9 +104,8 @@ static FUNC_DEF_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?m)^\s*(?:async\s+)?def\s+(\w+)\s*\(([^)]*)\)").unwrap());
 
 // Sanitizer assignment: valid_path = validate_path(x) or valid_path = await validate_path(x)
-static SANITIZER_ASSIGN_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(\w+)\s*=\s*(?:await\s+)?(\w+(?:\.\w+)*)\s*\(").unwrap()
-});
+static SANITIZER_ASSIGN_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(\w+)\s*=\s*(?:await\s+)?(\w+(?:\.\w+)*)\s*\(").unwrap());
 
 impl LanguageParser for PythonParser {
     fn language(&self) -> Language {
@@ -290,9 +290,7 @@ impl LanguageParser for PythonParser {
                     if parts.len() == 2 {
                         let method = parts[0];
                         let obj = parts[1];
-                        if http_client_vars.contains(obj)
-                            && HTTP_CLIENT_METHODS.contains(&method)
-                        {
+                        if http_client_vars.contains(obj) && HTTP_CLIENT_METHODS.contains(&method) {
                             let sends_data = method == "post"
                                 || method == "put"
                                 || method == "patch"
@@ -345,7 +343,8 @@ impl LanguageParser for PythonParser {
                     .get(line_idx + 1)
                     .map(|l| l.trim().trim_end_matches(','))
                     .unwrap_or("");
-                let arg_source = classify_argument(first_arg_str, &param_names, &parsed.sanitized_vars);
+                let arg_source =
+                    classify_argument(first_arg_str, &param_names, &parsed.sanitized_vars);
 
                 // Check all pattern categories for partial calls
                 if SUBPROCESS_PATTERNS
@@ -406,12 +405,9 @@ impl LanguageParser for PythonParser {
                     if parts.len() == 2 {
                         let method = parts[0];
                         let obj = parts[1];
-                        if http_client_vars.contains(obj)
-                            && HTTP_CLIENT_METHODS.contains(&method)
-                        {
-                            let sends_data = method == "post"
-                                || method == "put"
-                                || method == "patch";
+                        if http_client_vars.contains(obj) && HTTP_CLIENT_METHODS.contains(&method) {
+                            let sends_data =
+                                method == "post" || method == "put" || method == "patch";
                             let http_method = match method {
                                 "get" => Some("GET".into()),
                                 "post" => Some("POST".into()),
@@ -694,7 +690,10 @@ def _internal_helper(x):
         assert!(read_file.unwrap().is_exported); // no underscore prefix
         assert_eq!(read_file.unwrap().params, vec!["path"]);
 
-        let helper = parsed.function_defs.iter().find(|d| d.name == "_internal_helper");
+        let helper = parsed
+            .function_defs
+            .iter()
+            .find(|d| d.name == "_internal_helper");
         assert!(helper.is_some());
         assert!(!helper.unwrap().is_exported); // underscore prefix = private
     }

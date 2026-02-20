@@ -24,8 +24,8 @@ agentshield/
 │   │   ├── dependency_surface.rs # Dependencies, lockfiles
 │   │   └── provenance_surface.rs # Author, repo, license
 │   ├── adapter/                  # Framework → IR (3-phase pipeline)
-│   │   ├── mod.rs                # Adapter trait, auto_detect_and_load()
-│   │   ├── mcp.rs                # MCP server adapter
+│   │   ├── mod.rs                # Adapter trait, auto_detect_and_load(root, ignore_tests)
+│   │   ├── mcp.rs                # MCP server adapter + is_test_file() helper
 │   │   └── openclaw.rs           # OpenClaw SKILL.md adapter
 │   ├── parser/                   # Language parsers
 │   │   ├── mod.rs                # Parser trait, ParsedFile, FunctionDef, CallSite
@@ -50,7 +50,7 @@ agentshield/
 │   │   ├── json.rs               # JSON
 │   │   ├── sarif.rs              # SARIF 2.1.0
 │   │   └── html.rs               # Self-contained HTML
-│   └── config/                   # .agentshield.toml parsing
+│   └── config/                   # .agentshield.toml parsing (policy + scan sections)
 ├── tests/fixtures/               # Test MCP servers (safe + vulnerable)
 │   └── mcp_servers/
 │       ├── safe_calculator/      # Zero-finding baseline
@@ -79,8 +79,8 @@ cargo fmt --check
 
 # Run CLI
 cargo run -- scan tests/fixtures/mcp_servers/vuln_cmd_inject
+cargo run -- scan . --ignore-tests --format html --output report.html
 cargo run -- list-rules
-cargo run -- scan . --format html --output report.html
 ```
 
 ## Architecture Principles
@@ -98,6 +98,7 @@ cargo run -- scan . --format html --output report.html
 - `ArgumentSource` — `Literal` (safe), `Parameter` (tainted), `EnvVar`, `Interpolated`, `Unknown`, `Sanitized` (safe, v0.2.2)
 - `Detector` trait — `metadata() -> RuleMetadata`, `run(&ScanTarget) -> Vec<Finding>`
 - `PolicyVerdict` — pass/fail with threshold and highest severity
+- `ScanConfig` — `[scan]` config section with `ignore_tests` bool
 - `ParsedFile` — parser output with `commands`, `file_operations`, `network_operations`, `function_defs`, `call_sites`, `sanitized_vars`
 - `FunctionDef` — extracted function definition with name, params, `is_exported`
 - `CallSite` — function call with callee name, classified arguments, caller context
@@ -141,6 +142,22 @@ The `apply_cross_file_sanitization()` function:
 
 **Sanitizer registry** (`is_sanitizer()`): recognizes `validatePath`, `path.resolve`, `os.path.realpath`, `parseInt`, `URL.parse`, and pattern-based matches like `validate*Path`, `sanitize*`.
 
+## Test File Exclusion (`--ignore-tests`)
+
+The `--ignore-tests` flag skips test files at the file-walking stage (before parsing). Available via:
+- **CLI:** `agentshield scan . --ignore-tests`
+- **Config:** `[scan] ignore_tests = true` in `.agentshield.toml`
+- **GitHub Action:** `ignore-tests: true` input
+- **Library:** `ScanOptions { ignore_tests: true, .. }`
+
+CLI flag overrides config (`options.ignore_tests || config.scan.ignore_tests`).
+
+`is_test_file()` in `src/adapter/mcp.rs` matches:
+- Directories: `test/`, `tests/`, `__tests__/`, `__pycache__/`
+- Suffixes: `.test.{ts,js,tsx,jsx,py}`, `.spec.{ts,js,tsx,jsx}`
+- Prefixes: `test_*.py` (pytest)
+- Config: `conftest.py`, `jest.config.*`, `vitest.config.*`, `pytest.ini`, `setup.cfg`
+
 ## Adding a New Detector
 
 1. Create `src/rules/builtin/your_detector.rs`
@@ -176,3 +193,4 @@ The `apply_cross_file_sanitization()` function:
 | 0.2.0 | 69 | TypeScript tree-sitter parser, Homebrew, GitHub Action |
 | 0.2.1 | 69 | Async HTTP detection, GitPython, typosquat allowlist, Marketplace |
 | 0.2.2 | 83 | Cross-file validation tracking (IBVI-482) |
+| 0.2.3 | 83 | `--ignore-tests` flag, `[scan]` config section |

@@ -55,6 +55,7 @@ jobs:
         with:
           path: '.'
           fail-on: 'high'
+          ignore-tests: true
           upload-sarif: true
 ```
 
@@ -71,6 +72,9 @@ agentshield scan .
 
 # Scan with specific format and threshold
 agentshield scan ./my-mcp-server --format sarif --fail-on medium --output results.sarif
+
+# Skip test files (test/, tests/, __tests__/, *.test.ts, *.spec.ts, etc.)
+agentshield scan ./my-mcp-server --ignore-tests
 
 # Generate HTML report
 agentshield scan ./my-mcp-server --format html --output report.html
@@ -158,6 +162,10 @@ ignore_rules = ["SHIELD-008"]
 # Downgrade specific rules
 [policy.overrides]
 "SHIELD-012" = "info"
+
+[scan]
+# Skip test files (test/, tests/, __tests__/, *.test.ts, *.spec.ts, etc.)
+ignore_tests = true
 ```
 
 ---

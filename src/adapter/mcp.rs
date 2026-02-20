@@ -70,7 +70,7 @@ impl super::Adapter for McpAdapter {
         false
     }
 
-    fn load(&self, root: &Path) -> Result<Vec<ScanTarget>> {
+    fn load(&self, root: &Path, ignore_tests: bool) -> Result<Vec<ScanTarget>> {
         let name = root
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -81,7 +81,7 @@ impl super::Adapter for McpAdapter {
         let mut tools = Vec::new();
 
         // Collect source files
-        collect_source_files(root, &mut source_files)?;
+        collect_source_files(root, ignore_tests, &mut source_files)?;
 
         // Phase 1: Parse each source file, collecting results for cross-file analysis.
         let mut parsed_files: Vec<(PathBuf, parser::ParsedFile)> = Vec::new();
@@ -138,7 +138,71 @@ impl super::Adapter for McpAdapter {
     }
 }
 
-fn collect_source_files(root: &Path, files: &mut Vec<SourceFile>) -> Result<()> {
+/// Check if a file path belongs to a test file or test directory.
+///
+/// Matches common conventions across Python, TypeScript, and JavaScript:
+/// - Directories: `test/`, `tests/`, `__tests__/`, `__pycache__/`
+/// - Suffixes: `.test.{ts,js,tsx,jsx,py}`, `.spec.{ts,js,tsx,jsx}`
+/// - Prefixes: `test_*.py` (pytest convention)
+/// - Config files: `conftest.py`, `jest.config.*`, `vitest.config.*`, `pytest.ini`, `setup.cfg`
+pub fn is_test_file(path: &Path) -> bool {
+    // Check if any path component is a test directory
+    for component in path.components() {
+        if let std::path::Component::Normal(name) = component {
+            let name = name.to_string_lossy();
+            if matches!(
+                name.as_ref(),
+                "test" | "tests" | "__tests__" | "__pycache__"
+            ) {
+                return true;
+            }
+        }
+    }
+
+    let file_name = match path.file_name() {
+        Some(n) => n.to_string_lossy(),
+        None => return false,
+    };
+    let file_name = file_name.as_ref();
+
+    // Test config files
+    if matches!(file_name, "conftest.py" | "pytest.ini" | "setup.cfg")
+        || file_name.starts_with("jest.config.")
+        || file_name.starts_with("vitest.config.")
+    {
+        return true;
+    }
+
+    // pytest prefix convention: test_*.py
+    if file_name.starts_with("test_") && file_name.ends_with(".py") {
+        return true;
+    }
+
+    // Suffix conventions: *.test.{ts,js,tsx,jsx,py}, *.spec.{ts,js,tsx,jsx}
+    for suffix in [
+        ".test.ts",
+        ".test.js",
+        ".test.tsx",
+        ".test.jsx",
+        ".test.py",
+        ".spec.ts",
+        ".spec.js",
+        ".spec.tsx",
+        ".spec.jsx",
+    ] {
+        if file_name.ends_with(suffix) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn collect_source_files(
+    root: &Path,
+    ignore_tests: bool,
+    files: &mut Vec<SourceFile>,
+) -> Result<()> {
     let walker = ignore::WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
@@ -148,6 +212,10 @@ fn collect_source_files(root: &Path, files: &mut Vec<SourceFile>) -> Result<()> 
     for entry in walker.flatten() {
         let path = entry.path();
         if !path.is_file() {
+            continue;
+        }
+
+        if ignore_tests && is_test_file(path) {
             continue;
         }
 

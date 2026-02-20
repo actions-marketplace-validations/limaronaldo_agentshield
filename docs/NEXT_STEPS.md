@@ -1,6 +1,6 @@
 # Next Steps — Post v0.1.0
 
-Status: v0.2.2 shipped Feb 20, 2026. TypeScript tree-sitter parser, crates.io, Homebrew, GitHub Action e2e, real-world validation, cross-file validation tracking — all done.
+Status: v0.2.3 shipped Feb 20, 2026. TypeScript tree-sitter parser, crates.io, Homebrew, GitHub Action e2e, real-world validation, cross-file validation tracking, `--ignore-tests` — all done.
 
 ---
 
@@ -12,7 +12,7 @@ Completed Feb 20, 2026. Scanned 7 Anthropic reference MCP servers. See `docs/VAL
 
 - **170 total findings** across 7 servers (everything, fetch, filesystem, git, memory, sequentialthinking, time)
 - **0 false negatives** remaining (2 critical P1 issues found and fixed)
-- **~53% false positives** (mostly test files — need `--ignore-tests` flag)
+- **~53% false positives** (mostly test files — ~~need `--ignore-tests` flag~~ **done v0.2.3**)
 - **1 parser panic** found and fixed (single-char string literals)
 
 ### Bugs Found and Fixed
@@ -26,7 +26,7 @@ Completed Feb 20, 2026. Scanned 7 Anthropic reference MCP servers. See `docs/VAL
 
 | Priority | Issue | Impact | Effort |
 |----------|-------|--------|--------|
-| **P2** | Test file exclusion (`--ignore-tests`) | Medium — reduces noise ~60% | Low |
+| ~~**P2**~~ | ~~Test file exclusion (`--ignore-tests`)~~ | ~~Done v0.2.3~~ | ~~Done~~ |
 | ~~**P3**~~ | ~~Cross-file validation tracking~~ | ~~Done v0.2.2 (IBVI-482)~~ | ~~Done~~ |
 
 ---
@@ -115,12 +115,41 @@ Eliminates false positives from internal helper functions that receive already-v
 
 | Feature | Linear | Effort | Impact |
 |---------|--------|--------|--------|
-| Test file exclusion (`--ignore-tests`) | — | Low | Medium — reduces remaining noise |
-| Re-scan 7 Anthropic servers with v0.2.2 | — | Low | Medium — measure FP reduction |
+| ~~Test file exclusion (`--ignore-tests`)~~ | — | ~~Done v0.2.3~~ | ~~Done~~ |
+| Re-scan 7 Anthropic servers with v0.2.3 | — | Low | Medium — measure FP reduction |
 | Blog post / announcement | [IBVI-484](https://linear.app/mbras/issue/IBVI-484) | Medium | High — launch content |
 | VS Code extension | [IBVI-485](https://linear.app/mbras/issue/IBVI-485) | Medium | Medium — inline findings |
 | LangChain adapter | [IBVI-486](https://linear.app/mbras/issue/IBVI-486) | Medium | Medium — new framework |
 | CrewAI adapter | [IBVI-487](https://linear.app/mbras/issue/IBVI-487) | Low | Low — new framework |
+
+---
+
+## 7. v0.2.3 — Test File Exclusion (`--ignore-tests`) — Done
+
+Completed Feb 20, 2026.
+
+### What it does
+
+Filters out test files at the file-walking stage (before parsing) via `is_test_file()` in `src/adapter/mcp.rs`. Available through CLI flag (`--ignore-tests`), config file (`[scan] ignore_tests = true`), GitHub Action input (`ignore-tests: true`), and library API (`ScanOptions { ignore_tests: true }`).
+
+### Test file patterns matched
+
+- **Directories:** `test/`, `tests/`, `__tests__/`, `__pycache__/`
+- **Suffixes:** `.test.{ts,js,tsx,jsx,py}`, `.spec.{ts,js,tsx,jsx}`
+- **Prefixes:** `test_*.py` (pytest convention)
+- **Config files:** `conftest.py`, `jest.config.*`, `vitest.config.*`, `pytest.ini`, `setup.cfg`
+
+### Implementation
+
+- `is_test_file()` helper in `src/adapter/mcp.rs` (shared by OpenClaw adapter)
+- `ignore_tests: bool` parameter added to `Adapter::load()` and `auto_detect_and_load()`
+- `ScanConfig` struct with `ignore_tests` field in `src/config/mod.rs`
+- CLI flag OR's with config: `options.ignore_tests || config.scan.ignore_tests`
+- `ignore-tests` input added to `action.yml` GitHub Action
+
+### Expected Impact
+
+The v0.2.0 validation report showed ~53% false positives, mostly from test files. With `--ignore-tests`, the filesystem server's ~79 test-file findings and the memory server's 17 test-file findings would be eliminated, reducing total noise by approximately 60%.
 
 ---
 

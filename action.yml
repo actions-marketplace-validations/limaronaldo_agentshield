@@ -27,6 +27,10 @@ inputs:
     description: 'Upload SARIF results to GitHub Code Scanning'
     required: false
     default: 'true'
+  ignore-tests:
+    description: 'Skip test files (test/, tests/, __tests__/, *.test.ts, *.spec.ts, etc.)'
+    required: false
+    default: 'false'
   version:
     description: 'AgentShield version to use (default: latest)'
     required: false
@@ -113,6 +117,10 @@ runs:
 
         if [ -n "${{ inputs.config }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config }}"
+        fi
+
+        if [ "${{ inputs.ignore-tests }}" = "true" ]; then
+          ARGS="$ARGS --ignore-tests"
         fi
 
         set +e
