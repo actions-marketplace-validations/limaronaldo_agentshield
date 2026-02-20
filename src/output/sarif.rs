@@ -34,15 +34,17 @@ pub fn render(findings: &[Finding], target_name: &str) -> Result<String> {
 
     let results: Vec<Value> = findings
         .iter()
-        .map(|f| {
+        .filter_map(|f| {
+            // SARIF consumers (GitHub Code Scanning) require at least one
+            // location per result. Skip findings without a source location
+            // (e.g. supply-chain findings like SHIELD-009, SHIELD-012).
+            let loc = f.location.as_ref()?;
+
             let mut result = json!({
                 "ruleId": f.rule_id,
                 "level": severity_to_sarif_level(f.severity),
                 "message": { "text": f.message },
-            });
-
-            if let Some(loc) = &f.location {
-                result["locations"] = json!([{
+                "locations": [{
                     "physicalLocation": {
                         "artifactLocation": {
                             "uri": loc.file.display().to_string(),
@@ -52,15 +54,15 @@ pub fn render(findings: &[Finding], target_name: &str) -> Result<String> {
                             "startColumn": loc.column.max(1),
                         },
                     },
-                }]);
-            }
+                }],
+            });
 
             if let Some(remediation) = &f.remediation {
                 result["properties"] =
                     json!({ "remediation": remediation });
             }
 
-            result
+            Some(result)
         })
         .collect();
 
