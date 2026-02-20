@@ -1,65 +1,33 @@
 # Next Steps — Post v0.1.0
 
-Status: v0.2.0 shipped Feb 20, 2026. TypeScript tree-sitter parser, crates.io, Homebrew, GitHub Action e2e — all done.
+Status: v0.2.0 shipped Feb 20, 2026. TypeScript tree-sitter parser, crates.io, Homebrew, GitHub Action e2e, real-world validation — all done.
 
 ---
 
-## 1. Real-World Validation (High Priority)
+## ~~1. Real-World Validation~~ — Done
 
-Scan popular open-source MCP servers to find false positives/negatives and tune detectors.
+Completed Feb 20, 2026. Scanned 7 Anthropic reference MCP servers. See `docs/VALIDATION_REPORT.md` for full results.
 
-### Targets to scan
+### Results Summary
 
-```bash
-# Clone popular MCP servers
-mkdir -p /tmp/mcp-audit && cd /tmp/mcp-audit
+- **170 total findings** across 7 servers (everything, fetch, filesystem, git, memory, sequentialthinking, time)
+- **0 false negatives** remaining (2 critical P1 issues found and fixed)
+- **~53% false positives** (mostly test files — need `--ignore-tests` flag)
+- **1 parser panic** found and fixed (single-char string literals)
 
-# Anthropic's reference servers
-git clone https://github.com/modelcontextprotocol/servers.git mcp-official
+### Bugs Found and Fixed
 
-# Community servers (pick from awesome-mcp-servers)
-git clone https://github.com/punkpeye/awesome-mcp-servers.git awesome-list
-# Browse awesome-list for popular servers, then clone individually
+1. **P0: Parser panic** on single-char strings (`typescript.rs`) — fixed with length guard
+2. **P1: Async HTTP client detection** — `httpx.AsyncClient`/`aiohttp.ClientSession` context manager method calls now detected via `HTTP_CLIENT_CTX_RE` + `HTTP_CLIENT_METHODS` + `PARTIAL_CALL_RE` (multi-line support)
+3. **P1: GitPython command detection** — `repo.git.*` dynamic dispatchers now detected via `GITPYTHON_RE`
+4. **P2: vitest typosquat FP** — added `KNOWN_SAFE` allowlist to typosquat detector
 
-# Specific high-profile ones to try:
-# - filesystem server (file read/write — should trigger SHIELD-004)
-# - fetch/web server (HTTP requests — should trigger SHIELD-003/007)
-# - git server (command execution — may trigger SHIELD-001)
-# - database servers (SQL — watch for false positives)
-```
+### Remaining Improvements
 
-### Run scans
-
-```bash
-# Scan each server, output to JSON for analysis
-cd /tmp/mcp-audit
-
-for dir in mcp-official/src/*/; do
-  name=$(basename "$dir")
-  echo "=== Scanning $name ==="
-  agentshield scan "$dir" --format json --output "results-${name}.json" 2>&1
-  echo "Exit: $?"
-  echo ""
-done
-
-# Generate HTML reports for interesting ones
-agentshield scan mcp-official/src/filesystem --format html --output report-filesystem.html
-agentshield scan mcp-official/src/fetch --format html --output report-fetch.html
-```
-
-### What to look for
-
-- **False positives**: safe patterns flagged as vulnerabilities (e.g., a server that validates URLs before fetching)
-- **False negatives**: known-dangerous patterns not caught (look at server code manually)
-- **Severity calibration**: are Critical/High findings actually that severe in context?
-- **Missing detectors**: patterns we should catch but don't have rules for
-
-### Tuning actions
-
-After scanning, if you find issues:
-- False positives → adjust regex patterns or add allowlist heuristics in the detector
-- False negatives → add new patterns to the relevant parser (python.rs) or detector
-- New category → create a new SHIELD-0XX detector
+| Priority | Issue | Impact | Effort |
+|----------|-------|--------|--------|
+| **P2** | Test file exclusion (`--ignore-tests`) | Medium — reduces noise ~60% | Low |
+| **P3** | Cross-file validation tracking | High — resolves filesystem FPs | High |
 
 ---
 
@@ -110,7 +78,7 @@ Features deferred from v0.1.0:
 | ~~TypeScript parser (tree-sitter)~~ | ~~RML-1078~~ | ~~Done v0.2.0~~ | ~~High~~ |
 | ~~Homebrew formula~~ | — | ~~Done v0.2.0~~ | ~~Medium~~ |
 | ~~GitHub Action e2e test~~ | ~~IBVI-488~~ | ~~Done v0.2.0~~ | ~~High~~ |
-| Real-world validation | [IBVI-481](https://linear.app/mbras/issue/IBVI-481) | Medium | High — tune detectors |
+| ~~Real-world validation~~ | ~~[IBVI-481](https://linear.app/mbras/issue/IBVI-481)~~ | ~~Done v0.2.0~~ | ~~High — 170 findings, 4 bugs fixed~~ |
 | Cross-file taint analysis | [IBVI-482](https://linear.app/mbras/issue/IBVI-482) | High | High — catches multi-file exfil |
 | GitHub Marketplace submission | [IBVI-483](https://linear.app/mbras/issue/IBVI-483) | Low | High — discoverability |
 | Blog post / announcement | [IBVI-484](https://linear.app/mbras/issue/IBVI-484) | Medium | High — launch content |

@@ -12,14 +12,14 @@
 | Server | Language | Findings | Critical Issues |
 |--------|----------|----------|----------------|
 | **everything** | TypeScript | 20 | 4 high (SHIELD-003, -004) |
-| **fetch** | Python | 0 | **False negative** — SSRF not detected |
+| **fetch** | Python | 4 | ~~0 (FN)~~ → 2 SSRF + 2 Prompt Injection (**fixed**) |
 | **filesystem** | TypeScript | 101 | **Noisy** — 87 high but all post-validation |
-| **git** | Python | 0 | **False negative** — command exec not detected |
+| **git** | Python | 9 | ~~0 (FN)~~ → 9 cmd injection via GitPython (**fixed**) |
 | **memory** | TypeScript | 25 | 17 high (mostly test files) |
 | **sequentialthinking** | TypeScript | 11 | Supply-chain only |
 | **time** | TypeScript | 0 | Correct — no dangerous patterns |
 
-**Total findings across 7 servers:** 157
+**Total findings across 7 servers:** 170 (was 157 before P1 fixes)
 
 ---
 
@@ -37,13 +37,13 @@
 
 ---
 
-## False Negatives (Critical)
+## False Negatives (Critical) — All Fixed
 
-### FN-1: `fetch` server — SSRF not detected (SHIELD-003)
+### FN-1: `fetch` server — SSRF not detected (SHIELD-003) — FIXED
 
 **Expected:** SHIELD-003 (SSRF) + SHIELD-007 (Prompt Injection Surface)
 
-**Actual:** 0 findings
+**Actual (before fix):** 0 findings | **After fix:** 4 findings (2× SHIELD-003, 2× SHIELD-007)
 
 **Root cause:** The fetch server uses `httpx.AsyncClient` context manager pattern:
 
@@ -54,16 +54,13 @@ async with AsyncClient(proxies=proxy_url) as client:
 
 The Python parser's `NETWORK_PATTERNS` includes `httpx.get` but not `client.get` — it can't follow the variable binding from `AsyncClient()` to `client.get()`.
 
-**Fix needed:** Either:
-- Add async context manager tracking to the Python parser (cross-statement taint)
-- Add `client.get`, `client.post` etc. as network sink patterns
-- Or use tree-sitter AST to follow variable assignments
+**Fix applied:** Added `HTTP_CLIENT_CTX_RE` regex to track async context manager bindings (`async with AsyncClient() as client:`), `HTTP_CLIENT_METHODS` list for variable method matching, and `PARTIAL_CALL_RE` for multi-line function call detection.
 
-### FN-2: `git` server — command execution not detected (SHIELD-001)
+### FN-2: `git` server — command execution not detected (SHIELD-001) — FIXED
 
 **Expected:** SHIELD-001 (Command Injection)
 
-**Actual:** 0 findings
+**Actual (before fix):** 0 findings | **After fix:** 9 findings (all SHIELD-001)
 
 **Root cause:** The git server uses `GitPython` library:
 
@@ -75,9 +72,7 @@ repo.git.branch(name)    # user branch name
 
 The Python parser's `EXEC_PATTERNS` includes `subprocess.run`, `os.system`, etc. but not GitPython's `repo.git.*` methods, which are dynamic method dispatchers that execute shell commands.
 
-**Fix needed:**
-- Add GitPython patterns: `repo.git.`, `.git.execute`, `.git.log`, `.git.add`
-- Consider a "library command abstraction" category for libraries that wrap shell execution
+**Fix applied:** Added `GITPYTHON_RE` regex matching `<var>.git.<method>(...)` patterns as command invocations.
 
 ---
 
@@ -118,11 +113,11 @@ All "Self-Modification" findings are on file writes that cannot reach the server
 
 12 SHIELD-004 and 5 SHIELD-006 findings, all in test files (`knowledge-graph.test.ts`, `file-path.test.ts`). Tests intentionally read/write to temp paths.
 
-### FP-4: `vitest` flagged as typosquat of `pytest` (SHIELD-010)
+### FP-4: `vitest` flagged as typosquat of `pytest` (SHIELD-010) — FIXED
 
-`vitest` (JavaScript test runner) is flagged as similar to `pytest` (Python test runner). These are both well-known, legitimate packages. The Levenshtein distance is 2 (vi→py), which triggers the threshold.
+`vitest` (JavaScript test runner) was flagged as similar to `pytest` (Python test runner). These are both well-known, legitimate packages. The Levenshtein distance is 2 (vi→py), which triggers the threshold.
 
-**Fix needed:** Add `vitest` to the allowlist of known-good packages.
+**Fix applied:** Added `KNOWN_SAFE` allowlist (`vitest`, `nuxt`, `vite`, etc.) that skips Levenshtein comparison for known-good packages.
 
 ---
 
@@ -151,11 +146,30 @@ The reference servers don't commit lockfiles (they use a monorepo root lockfile)
 | Priority | Issue | Impact | Effort |
 |----------|-------|--------|--------|
 | **P0** | ~~Parser panic on single-char strings~~ | **Fixed** | Done |
-| **P1** | Async HTTP client detection (FN-1) | High — misses modern Python SSRF | Medium |
-| **P1** | Library command abstractions — GitPython (FN-2) | High — misses real cmd injection | Low |
+| **P1** | ~~Async HTTP client detection (FN-1)~~ | **Fixed** — fetch server: 4 findings | Done |
+| **P1** | ~~Library command abstractions — GitPython (FN-2)~~ | **Fixed** — git server: 9 findings | Done |
 | **P2** | Test file exclusion flag | Medium — reduces noise by ~60% | Low |
-| **P2** | `vitest` allowlist (FP-4) | Low — cosmetic | Trivial |
+| **P2** | ~~`vitest` allowlist (FP-4)~~ | **Fixed** — known-safe packages allowlist | Done |
 | **P3** | Cross-file validation tracking (FP-1) | High — but very complex | High |
+
+---
+
+## Post-Fix Re-Scan (Feb 20, 2026)
+
+After implementing the P1 fixes, re-scanning the two previously-missed servers:
+
+| Server | Before | After | Key Findings |
+|--------|--------|-------|-------------|
+| **fetch** | 0 | **4** | 2× SHIELD-003 (SSRF), 2× SHIELD-007 (Prompt Injection) |
+| **git** | 0 | **9** | 9× SHIELD-001 (Command Injection via `repo.git.*`) |
+
+**Fixes applied:**
+1. Async HTTP context manager tracking (`AsyncClient`/`ClientSession` → variable method calls)
+2. Multi-line function call detection (partial call regex + next-line lookahead)
+3. GitPython `repo.git.*` command pattern matching
+4. Typosquat allowlist for `vitest`, `nuxt`, and other known-safe packages
+
+**Updated total:** 157 → **170** findings across 7 servers.
 
 ---
 
@@ -164,9 +178,9 @@ The reference servers don't commit lockfiles (they use a monorepo root lockfile)
 | Metric | Value |
 |--------|-------|
 | Servers scanned | 7 |
-| Total findings | 157 |
-| True positives | ~35 (22%) |
-| False positives | ~90 (57%) — mostly test files |
-| False negatives | 2 critical (fetch SSRF, git cmd injection) |
+| Total findings | 170 (was 157 before P1 fixes) |
+| True positives | ~48 (28%) |
+| False positives | ~90 (53%) — mostly test files |
+| False negatives | ~~2 critical~~ → **0** (both fixed) |
 | Parser crashes | 1 (fixed) |
-| Supply-chain (expected) | ~32 (20%) |
+| Supply-chain (expected) | ~32 (19%) |

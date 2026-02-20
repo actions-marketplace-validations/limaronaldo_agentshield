@@ -27,6 +27,12 @@ static SUBPROCESS_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| {
     ]
 });
 
+// GitPython's `repo.git.*` methods are dynamic dispatchers that execute
+// `git <method> ...` as shell commands. We match the `.git.` segment.
+static GITPYTHON_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?m)(\w+)\.git\.(\w+)\s*\(([^)]*)\)").unwrap()
+});
+
 static NETWORK_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| {
     vec![
         "requests.get",
@@ -40,9 +46,28 @@ static NETWORK_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| {
         "httpx.get",
         "httpx.post",
         "httpx.put",
-        "httpx.AsyncClient",
-        "aiohttp.ClientSession",
+        // httpx.AsyncClient and aiohttp.ClientSession are tracked via
+        // HTTP_CLIENT_CTX_RE + HTTP_CLIENT_METHODS instead, so their actual
+        // method calls (client.get, session.post) are detected as network ops.
     ]
+});
+
+// HTTP method names used on client variables (e.g. `client.get(url)` where
+// `client` was bound from `httpx.AsyncClient()` or `aiohttp.ClientSession()`).
+// Checked separately from NETWORK_PATTERNS because the caller object is a
+// variable, not a known module.
+static HTTP_CLIENT_METHODS: Lazy<Vec<&str>> = Lazy::new(|| {
+    vec!["get", "post", "put", "patch", "delete", "head", "options", "request", "fetch", "send"]
+});
+
+// Regex to detect async context managers that produce HTTP clients.
+// Matches: `async with httpx.AsyncClient(...) as <name>:`
+//          `async with aiohttp.ClientSession(...) as <name>:`
+static HTTP_CLIENT_CTX_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?m)async\s+with\s+(?:\w+\.)*(?:AsyncClient|ClientSession)\s*\([^)]*\)\s+as\s+(\w+)"
+    )
+    .unwrap()
 });
 
 static DYNAMIC_EXEC_PATTERNS: Lazy<Vec<&str>> =
@@ -57,6 +82,12 @@ static FILE_READ_PATTERNS: Lazy<Vec<&str>> = Lazy::new(|| vec!["open", "pathlib.
 // Regex to find function calls with arguments: func_name(args)
 static CALL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?m)(\w+(?:\.\w+)*)\s*\(([^)]*)\)").unwrap());
+
+// Regex to find the start of a multi-line call: func_name( with no closing )
+// Captures the function name so we can match it against patterns, then look
+// ahead to the next line(s) for the first argument.
+static PARTIAL_CALL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(\w+(?:\.\w+)*)\s*\(\s*$").unwrap());
 
 // Regex to find os.environ / os.getenv patterns
 static ENV_ACCESS_RE: Lazy<Regex> = Lazy::new(|| {
@@ -92,8 +123,18 @@ impl LanguageParser for PythonParser {
             }
         }
 
+        // Collect variable names bound to HTTP clients via async context managers
+        // e.g. `async with httpx.AsyncClient() as client:` → "client"
+        let mut http_client_vars = std::collections::HashSet::new();
+        for cap in HTTP_CLIENT_CTX_RE.captures_iter(content) {
+            http_client_vars.insert(cap[1].to_string());
+        }
+
+        // Collect lines for look-ahead on multi-line calls
+        let lines: Vec<&str> = content.lines().collect();
+
         // Scan line by line for patterns
-        for (line_idx, line) in content.lines().enumerate() {
+        for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
             let trimmed = line.trim();
 
@@ -193,6 +234,156 @@ impl LanguageParser for PythonParser {
                         path_arg: arg_source.clone(),
                         location: loc(&file_path, line_num),
                     });
+                }
+
+                // HTTP client variable method calls (FN-1 fix):
+                // Detect `client.get(url)` where `client` was bound from
+                // `async with AsyncClient() as client:`.
+                if func_name.contains('.') {
+                    let parts: Vec<&str> = func_name.rsplitn(2, '.').collect();
+                    if parts.len() == 2 {
+                        let method = parts[0];
+                        let obj = parts[1];
+                        if http_client_vars.contains(obj)
+                            && HTTP_CLIENT_METHODS.contains(&method)
+                        {
+                            let sends_data = method == "post"
+                                || method == "put"
+                                || method == "patch"
+                                || args_str.contains("data=")
+                                || args_str.contains("json=");
+                            let http_method = match method {
+                                "get" => Some("GET".into()),
+                                "post" => Some("POST".into()),
+                                "put" => Some("PUT".into()),
+                                "delete" => Some("DELETE".into()),
+                                "head" => Some("HEAD".into()),
+                                "patch" => Some("PATCH".into()),
+                                _ => None,
+                            };
+                            parsed.network_operations.push(NetworkOperation {
+                                function: func_name.to_string(),
+                                url_arg: arg_source.clone(),
+                                method: http_method,
+                                sends_data,
+                                location: loc(&file_path, line_num),
+                            });
+                        }
+                    }
+                }
+            }
+
+            // GitPython command execution (FN-2 fix):
+            // Detect `repo.git.log(...)`, `repo.git.add(...)`, etc.
+            for cap in GITPYTHON_RE.captures_iter(line) {
+                let full_call = format!("{}.git.{}", &cap[1], &cap[2]);
+                let args_str = &cap[3];
+                let arg_source = classify_argument(args_str, &param_names);
+                parsed.commands.push(CommandInvocation {
+                    function: full_call,
+                    command_arg: arg_source,
+                    location: loc(&file_path, line_num),
+                });
+            }
+
+            // Multi-line call detection: handle calls like
+            //   client.get(
+            //       url,
+            //       follow_redirects=True,
+            //   )
+            // where CALL_RE fails because `(` and `)` are on different lines.
+            if let Some(cap) = PARTIAL_CALL_RE.captures(trimmed) {
+                let func_name = &cap[1];
+                // Look ahead to find the first argument on the next non-empty line
+                let first_arg_str = lines
+                    .get(line_idx + 1)
+                    .map(|l| l.trim().trim_end_matches(','))
+                    .unwrap_or("");
+                let arg_source = classify_argument(first_arg_str, &param_names);
+
+                // Check all pattern categories for partial calls
+                if SUBPROCESS_PATTERNS
+                    .iter()
+                    .any(|p| func_name.ends_with(p) || func_name == *p)
+                {
+                    parsed.commands.push(CommandInvocation {
+                        function: func_name.to_string(),
+                        command_arg: arg_source.clone(),
+                        location: loc(&file_path, line_num),
+                    });
+                }
+                if NETWORK_PATTERNS
+                    .iter()
+                    .any(|p| func_name.ends_with(p) || func_name == *p)
+                {
+                    let sends_data = func_name.contains("post")
+                        || func_name.contains("put")
+                        || func_name.contains("patch");
+                    let method = if func_name.contains("get") {
+                        Some("GET".into())
+                    } else if func_name.contains("post") {
+                        Some("POST".into())
+                    } else if func_name.contains("put") {
+                        Some("PUT".into())
+                    } else {
+                        None
+                    };
+                    parsed.network_operations.push(NetworkOperation {
+                        function: func_name.to_string(),
+                        url_arg: arg_source.clone(),
+                        method,
+                        sends_data,
+                        location: loc(&file_path, line_num),
+                    });
+                }
+                if DYNAMIC_EXEC_PATTERNS.contains(&func_name) {
+                    parsed.dynamic_exec.push(DynamicExec {
+                        function: func_name.to_string(),
+                        code_arg: arg_source.clone(),
+                        location: loc(&file_path, line_num),
+                    });
+                }
+                if FILE_READ_PATTERNS
+                    .iter()
+                    .any(|p| func_name.ends_with(p) || func_name == *p)
+                {
+                    parsed.file_operations.push(FileOperation {
+                        operation: FileOpType::Read,
+                        path_arg: arg_source.clone(),
+                        location: loc(&file_path, line_num),
+                    });
+                }
+
+                // HTTP client variable methods (multi-line)
+                if func_name.contains('.') {
+                    let parts: Vec<&str> = func_name.rsplitn(2, '.').collect();
+                    if parts.len() == 2 {
+                        let method = parts[0];
+                        let obj = parts[1];
+                        if http_client_vars.contains(obj)
+                            && HTTP_CLIENT_METHODS.contains(&method)
+                        {
+                            let sends_data = method == "post"
+                                || method == "put"
+                                || method == "patch";
+                            let http_method = match method {
+                                "get" => Some("GET".into()),
+                                "post" => Some("POST".into()),
+                                "put" => Some("PUT".into()),
+                                "delete" => Some("DELETE".into()),
+                                "head" => Some("HEAD".into()),
+                                "patch" => Some("PATCH".into()),
+                                _ => None,
+                            };
+                            parsed.network_operations.push(NetworkOperation {
+                                function: func_name.to_string(),
+                                url_arg: arg_source.clone(),
+                                method: http_method,
+                                sends_data,
+                                location: loc(&file_path, line_num),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -322,5 +513,109 @@ def run(code):
             parsed.dynamic_exec[0].code_arg,
             ArgumentSource::Parameter { .. }
         ));
+    }
+
+    #[test]
+    fn detects_httpx_async_client_get() {
+        let code = r#"
+async def fetch(url: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert_eq!(parsed.network_operations.len(), 1);
+        assert_eq!(parsed.network_operations[0].function, "client.get");
+        assert!(matches!(
+            parsed.network_operations[0].url_arg,
+            ArgumentSource::Parameter { .. }
+        ));
+    }
+
+    #[test]
+    fn detects_aiohttp_client_session_post() {
+        let code = r#"
+async def send_data(url: str, data):
+    async with aiohttp.ClientSession() as session:
+        await session.post(url, json=data)
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert_eq!(parsed.network_operations.len(), 1);
+        assert_eq!(parsed.network_operations[0].function, "session.post");
+        assert!(parsed.network_operations[0].sends_data);
+    }
+
+    #[test]
+    fn detects_gitpython_command_execution() {
+        let code = r#"
+def git_log(repo, args):
+    repo.git.log(*args)
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert_eq!(parsed.commands.len(), 1);
+        assert_eq!(parsed.commands[0].function, "repo.git.log");
+    }
+
+    #[test]
+    fn detects_gitpython_add_with_user_files() {
+        let code = r#"
+def stage_files(repo, files):
+    repo.git.add("--", *files)
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert_eq!(parsed.commands.len(), 1);
+        assert_eq!(parsed.commands[0].function, "repo.git.add");
+    }
+
+    #[test]
+    fn no_false_positive_on_non_client_get() {
+        let code = r#"
+def process():
+    result = cache.get("key")
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert!(parsed.network_operations.is_empty());
+    }
+
+    #[test]
+    fn detects_multiline_async_client_get() {
+        // Real-world pattern from the MCP fetch server
+        let code = r#"
+async def fetch_url(url: str):
+    async with AsyncClient(proxies=proxy_url) as client:
+        response = await client.get(
+            url,
+            follow_redirects=True,
+            headers={"User-Agent": user_agent},
+        )
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert_eq!(
+            parsed.network_operations.len(),
+            1,
+            "should detect multi-line client.get() call"
+        );
+        assert_eq!(parsed.network_operations[0].function, "client.get");
+        assert!(matches!(
+            parsed.network_operations[0].url_arg,
+            ArgumentSource::Parameter { .. }
+        ));
+    }
+
+    #[test]
+    fn detects_multiline_subprocess_run() {
+        let code = r#"
+def execute(cmd: str):
+    subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+    )
+"#;
+        let parsed = PythonParser.parse_file(Path::new("test.py"), code).unwrap();
+        assert_eq!(
+            parsed.commands.len(),
+            1,
+            "should detect multi-line subprocess.run() call"
+        );
     }
 }

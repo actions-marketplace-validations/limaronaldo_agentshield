@@ -5,6 +5,20 @@ All notable changes to AgentShield will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-20
+
+### Fixed
+
+- **Python parser: async HTTP client detection** — `httpx.AsyncClient` / `aiohttp.ClientSession` context manager method calls (`client.get(url)`) now detected as SSRF sinks (SHIELD-003)
+- **Python parser: multi-line call support** — function calls spanning multiple lines now detected via `PARTIAL_CALL_RE` with next-line lookahead
+- **Python parser: GitPython command detection** — `repo.git.*` dynamic method dispatchers now detected as command injection sinks (SHIELD-001)
+- **Typosquat allowlist** — known-safe packages (`vitest`, `nuxt`, `vite`, etc.) no longer flagged as typosquats (SHIELD-010)
+
+### Changed
+
+- Version bump: 0.2.0 → 0.2.1
+- Validation: 0 false negatives remaining across 7 Anthropic MCP reference servers (170 total findings)
+
 ## [0.2.0] - 2026-02-20
 
 ### Added
@@ -29,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Python parser: async HTTP client detection** — `httpx.AsyncClient` / `aiohttp.ClientSession` context manager method calls (`client.get(url)`) now detected as SSRF sinks (SHIELD-003)
+- **Python parser: multi-line call support** — function calls spanning multiple lines now detected (e.g., `client.get(\n    url,\n    ...`)
+- **Python parser: GitPython command detection** — `repo.git.*` dynamic method dispatchers now detected as command injection sinks (SHIELD-001)
+- **Typosquat allowlist** — known-safe packages like `vitest` and `nuxt` no longer flagged as typosquats (SHIELD-010)
 - SARIF `startColumn` now 1-based (was 0-based, rejected by GitHub Code Scanning)
 - SARIF `fixes[]` replaced with `properties.remediation` (missing required `artifactChanges`)
 - SARIF skips location-less findings (supply-chain rules SHIELD-009, -012 have no source location)
@@ -88,5 +106,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Typosquat detection via Levenshtein distance against popular packages
   - Unpinned dependency version detection
 
+[0.2.1]: https://github.com/limaronaldo/agentshield/releases/tag/v0.2.1
 [0.2.0]: https://github.com/limaronaldo/agentshield/releases/tag/v0.2.0
 [0.1.0]: https://github.com/limaronaldo/agentshield/releases/tag/v0.1.0

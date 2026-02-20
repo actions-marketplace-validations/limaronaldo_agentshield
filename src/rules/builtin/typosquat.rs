@@ -45,6 +45,22 @@ const POPULAR_PYTHON: &[&str] = &[
     "anthropic",
 ];
 
+/// Known-safe packages that are within Levenshtein distance 1-2 of a popular
+/// package but are themselves legitimate. Prevents false positives like
+/// "vitest" being flagged as a typosquat of "pytest".
+const KNOWN_SAFE: &[&str] = &[
+    "vitest",    // JS test runner, distance 2 from "pytest"
+    "esbuild",   // JS bundler
+    "bun",       // JS runtime
+    "deno",      // JS runtime
+    "pnpm",      // JS package manager
+    "yarn",      // JS package manager
+    "tsx",       // TS exec
+    "tsup",      // TS bundler
+    "vite",      // JS build tool
+    "nuxt",      // Vue framework, distance 1 from "next"
+];
+
 /// Popular npm packages to compare against.
 const POPULAR_NPM: &[&str] = &[
     "express",
@@ -96,6 +112,11 @@ impl Detector for TyposquatDetector {
 
         for dep in &target.dependencies.dependencies {
             let name = dep.name.to_lowercase();
+
+            // Skip known-safe packages that look similar to popular ones
+            if KNOWN_SAFE.iter().any(|&safe| name == safe) {
+                continue;
+            }
 
             for &popular in &corpus {
                 if name == popular {
@@ -214,5 +235,35 @@ mod tests {
         }]);
         let findings = TyposquatDetector.run(&target);
         assert!(!findings.is_empty());
+    }
+
+    #[test]
+    fn vitest_not_flagged_as_typosquat() {
+        let target = make_target(vec![Dependency {
+            name: "vitest".into(),
+            version_constraint: Some("^1.0.0".into()),
+            locked_version: None,
+            locked_hash: None,
+            registry: "npm".into(),
+            is_dev: true,
+            location: None,
+        }]);
+        let findings = TyposquatDetector.run(&target);
+        assert!(findings.is_empty(), "vitest should not be flagged as typosquat of pytest");
+    }
+
+    #[test]
+    fn nuxt_not_flagged_as_typosquat() {
+        let target = make_target(vec![Dependency {
+            name: "nuxt".into(),
+            version_constraint: Some("^3.0.0".into()),
+            locked_version: None,
+            locked_hash: None,
+            registry: "npm".into(),
+            is_dev: false,
+            location: None,
+        }]);
+        let findings = TyposquatDetector.run(&target);
+        assert!(findings.is_empty(), "nuxt should not be flagged as typosquat of next");
     }
 }
