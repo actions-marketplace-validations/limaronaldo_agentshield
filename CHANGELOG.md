@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Version bump: 0.2.0 → 0.2.1
+- License: MIT → MIT OR Apache-2.0 (dual license)
+- Published to [GitHub Marketplace](https://github.com/marketplace/actions/agentshield-security-scanner)
 - Validation: 0 false negatives remaining across 7 Anthropic MCP reference servers (170 total findings)
 
 ## [0.2.0] - 2026-02-20

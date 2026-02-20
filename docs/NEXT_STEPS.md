@@ -80,7 +80,7 @@ Features deferred from v0.1.0:
 | ~~GitHub Action e2e test~~ | ~~IBVI-488~~ | ~~Done v0.2.0~~ | ~~High~~ |
 | ~~Real-world validation~~ | ~~[IBVI-481](https://linear.app/mbras/issue/IBVI-481)~~ | ~~Done v0.2.0~~ | ~~High — 170 findings, 4 bugs fixed~~ |
 | Cross-file taint analysis | [IBVI-482](https://linear.app/mbras/issue/IBVI-482) | High | High — catches multi-file exfil |
-| GitHub Marketplace submission | [IBVI-483](https://linear.app/mbras/issue/IBVI-483) | Low | High — discoverability |
+| ~~GitHub Marketplace submission~~ | ~~[IBVI-483](https://linear.app/mbras/issue/IBVI-483)~~ | ~~Done v0.2.1~~ | ~~High — [listed](https://github.com/marketplace/actions/agentshield-security-scanner)~~ |
 | Blog post / announcement | [IBVI-484](https://linear.app/mbras/issue/IBVI-484) | Medium | High — launch content |
 | VS Code extension | [IBVI-485](https://linear.app/mbras/issue/IBVI-485) | Medium | Medium — inline findings |
 | LangChain adapter | [IBVI-486](https://linear.app/mbras/issue/IBVI-486) | Medium | Medium — new framework |

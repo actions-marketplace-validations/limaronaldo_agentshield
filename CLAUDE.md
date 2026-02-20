@@ -60,7 +60,7 @@ agentshield/
 # Build
 cargo build --release
 
-# Test (46 tests)
+# Test (69 tests)
 cargo test
 
 # Lint
