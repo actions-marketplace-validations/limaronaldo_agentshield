@@ -1,0 +1,15 @@
+[project]
+name = "example-crewai-project"
+version = "0.1.0"
+description = "Test fixture for CrewAI adapter detection"
+requires-python = ">=3.10"
+dependencies = [
+    "crewai>=0.80.0",
+    "crewai-tools>=0.14.0",
+]
+
+[project.urls]
+Repository = "https://github.com/example/crewai-project"
+
+[tool.crewai]
+project_name = "example_crew"

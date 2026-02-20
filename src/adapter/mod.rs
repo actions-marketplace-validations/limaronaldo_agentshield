@@ -1,3 +1,5 @@
+pub mod crewai;
+pub mod langchain;
 pub mod mcp;
 pub mod openclaw;
 
@@ -25,6 +27,8 @@ pub fn all_adapters() -> Vec<Box<dyn Adapter>> {
     vec![
         Box::new(mcp::McpAdapter),
         Box::new(openclaw::OpenClawAdapter),
+        Box::new(crewai::CrewAiAdapter),
+        Box::new(langchain::LangChainAdapter),
     ]
 }
 

@@ -198,7 +198,7 @@ pub fn is_test_file(path: &Path) -> bool {
     false
 }
 
-fn collect_source_files(
+pub(super) fn collect_source_files(
     root: &Path,
     ignore_tests: bool,
     files: &mut Vec<SourceFile>,
@@ -253,7 +253,7 @@ fn collect_source_files(
     Ok(())
 }
 
-fn parse_dependencies(root: &Path) -> dependency_surface::DependencySurface {
+pub(super) fn parse_dependencies(root: &Path) -> dependency_surface::DependencySurface {
     use crate::ir::dependency_surface::*;
     let mut surface = DependencySurface::default();
 
@@ -355,7 +355,7 @@ fn parse_dependencies(root: &Path) -> dependency_surface::DependencySurface {
     surface
 }
 
-fn parse_provenance(root: &Path) -> provenance_surface::ProvenanceSurface {
+pub(super) fn parse_provenance(root: &Path) -> provenance_surface::ProvenanceSurface {
     let mut prov = provenance_surface::ProvenanceSurface::default();
 
     // From package.json
